@@ -1,5 +1,117 @@
 import { AmllDbPlatform, LocalSong, LyricProviderSource, SongResult, UnifiedSong } from '../types';
 import { NavidromeSong } from '../types/navidrome';
+import type { LocalLibraryAssignment, LocalLibraryEntity } from '../types/localLibrary';
+import { buildLocalLibraryIndex, followEntityRedirect, type LocalLibraryIndex } from '../utils/localLibraryIndex';
+
+export type LocalLibraryDisplayCatalog = {
+    entities: LocalLibraryEntity[];
+    assignments: LocalLibraryAssignment[];
+};
+
+export type ResolvedLocalSongMetadata = {
+    artists: Array<{ entityId: string; name: string }>;
+    album?: { entityId: string; name: string };
+};
+
+// Resolves the canonical artist and album display from stable entity assignments only.
+export const resolveLocalSongMetadata = (
+    songId: string,
+    catalog: LocalLibraryDisplayCatalog,
+    preparedIndex?: LocalLibraryIndex,
+): ResolvedLocalSongMetadata => {
+    const index = preparedIndex || buildLocalLibraryIndex(catalog.entities, catalog.assignments);
+    const assignment = index.assignmentsBySongId.get(songId);
+    const artists = assignment?.artistEntityIds.flatMap(entityId => {
+        const activeEntityId = followEntityRedirect(entityId, index.entitiesById);
+        const entity = activeEntityId ? index.entitiesById.get(activeEntityId) : undefined;
+        return entity?.kind === 'artist' ? [{ entityId: entity.id, name: entity.displayName }] : [];
+    }) || [];
+    const activeAlbumId = assignment?.albumEntityId
+        ? followEntityRedirect(assignment.albumEntityId, index.entitiesById)
+        : undefined;
+    const albumEntity = activeAlbumId ? index.entitiesById.get(activeAlbumId) : undefined;
+    return {
+        artists,
+        album: albumEntity?.kind === 'album'
+            ? { entityId: albumEntity.id, name: albumEntity.displayName }
+            : undefined,
+    };
+};
+
+const resolveLocalLibraryDisplayArtists = (
+    songId: string,
+    catalog?: LocalLibraryDisplayCatalog,
+    preparedIndex?: LocalLibraryIndex,
+) => {
+    if (!catalog) return [];
+
+    const resolved = resolveLocalSongMetadata(songId, catalog, preparedIndex);
+    const seenEntityIds = new Set<string>();
+    return resolved.artists.flatMap(entity => {
+        if (seenEntityIds.has(entity.entityId)) return [];
+        seenEntityIds.add(entity.entityId);
+        return [{ id: 0, entityId: entity.entityId, name: entity.name }];
+    });
+};
+
+// Replaces legacy joined artist text with the song's stable local-library artist entities.
+export const applyLocalLibraryArtistDisplay = <T extends SongResult>(
+    song: T,
+    catalog?: LocalLibraryDisplayCatalog,
+    preparedIndex?: LocalLibraryIndex,
+): T => {
+    const songId = (song as UnifiedSong).localRef?.songId;
+    if (!songId) return song;
+
+    const artists = resolveLocalLibraryDisplayArtists(songId, catalog, preparedIndex);
+    if (artists.length === 0) return song;
+
+    return {
+        ...song,
+        artists,
+    };
+};
+
+// Maps a local song's album assignment onto both album fields used by GridView and player surfaces.
+const applyLocalLibraryAlbumDisplay = <T extends SongResult>(
+    song: T,
+    catalog?: LocalLibraryDisplayCatalog,
+    preparedIndex?: LocalLibraryIndex,
+): T => {
+    const songId = (song as UnifiedSong).localRef?.songId;
+    if (!songId || !catalog) return song;
+
+    const entity = resolveLocalSongMetadata(songId, catalog, preparedIndex).album;
+    if (!entity) return song;
+
+    return {
+        ...song,
+        album: {
+            ...song.album,
+            entityId: entity.entityId,
+            name: entity.name,
+        },
+    };
+};
+
+// Applies the complete local entity display model used by cards, queues, and CoverTab.
+export const applyLocalLibraryEntityDisplay = <T extends SongResult>(
+    song: T,
+    catalog?: LocalLibraryDisplayCatalog,
+    preparedIndex?: LocalLibraryIndex,
+): T => applyLocalLibraryAlbumDisplay(
+    applyLocalLibraryArtistDisplay(song, catalog, preparedIndex),
+    catalog,
+    preparedIndex,
+);
+
+// Applies a resolved local cover URL to the canonical album field used by song cards.
+export const applyLocalSongCoverDisplay = <T extends SongResult>(song: T, coverUrl: string): T => ({
+    ...song,
+    album: song.album
+        ? { ...song.album, coverUrl }
+        : { id: 0, name: '', coverUrl },
+});
 
 export const getLocalSongId = (localSong: LocalSong): number => {
     // Generate a reliable 52-bit hash from the string ID to avoid parsing long digits and losing precision or colliding.
@@ -36,81 +148,55 @@ export function buildUnifiedLocalSong({
     const useMatchedLyrics =
         localSong.lyricsSource === 'online'
         || (!localSong.lyricsSource && !localSong.hasLocalLyrics && !localSong.hasEmbeddedLyrics);
-    const displayTitle = localSong.embeddedTitle || localSong.title || localSong.fileName;
-    const displayArtist = preferOnlineMetadata
-        ? (localSong.matchedArtists || localSong.embeddedArtist || localSong.artist)
-        : (localSong.embeddedArtist || localSong.matchedArtists || localSong.artist);
-    const displayAlbum = preferOnlineMetadata
-        ? (localSong.matchedAlbumName || localSong.embeddedAlbum || localSong.album)
-        : (localSong.embeddedAlbum || localSong.matchedAlbumName || localSong.album);
+    const displayTitle = localSong.title;
+    const displayArtists = (localSong.titleOrigin === 'import'
+        ? localSong.importedMetadata.artistNames
+        : localSong.onlineMetadata?.artists.map(artist => artist.name) || localSong.importedMetadata.artistNames)
+        .map(name => ({ id: 0, name }));
+    const displayAlbum = localSong.titleOrigin === 'import'
+        ? localSong.importedMetadata.albumName
+        : localSong.onlineMetadata?.album?.name || localSong.importedMetadata.albumName;
 
     const unifiedSong: UnifiedSong = {
         id: getLocalSongId(localSong),
         name: displayTitle,
-        artists: displayArtist ? [{ id: 0, name: displayArtist }] : [],
-        album: displayAlbum ? { id: 0, name: displayAlbum } : { id: 0, name: '' },
-        duration: localSong.duration,
+        artists: displayArtists,
+        album: displayAlbum ? { id: 0, name: displayAlbum, coverUrl: coverUrl || undefined } : { id: 0, name: '' },
+        durationMs: localSong.duration,
         isPureMusic: useMatchedLyrics ? localSong.matchedIsPureMusic : false,
-        ar: displayArtist ? [{ id: 0, name: displayArtist }] : [],
-        al: displayAlbum ? {
-            id: 0,
-            name: displayAlbum,
-            picUrl: coverUrl || undefined
-        } : coverUrl ? {
-            id: 0,
-            name: '',
-            picUrl: coverUrl
-        } : undefined,
-        dt: localSong.duration,
         isLocal: true,
-        localData: localSong
+        localRef: { songId: localSong.id },
+        sourceRef: { kind: 'local', mediaId: localSong.id },
     };
 
     if (!matchedSong) {
         return unifiedSong;
     }
 
-    if (!localSong.embeddedTitle) {
-        unifiedSong.name = matchedSong.name;
-    }
-
-    if (preferOnlineMetadata || !localSong.embeddedArtist) {
-        if (matchedSong.ar) unifiedSong.ar = matchedSong.ar;
-        if (matchedSong.artists) unifiedSong.artists = matchedSong.artists;
-    }
-
-    if (preferOnlineMetadata || !localSong.embeddedAlbum) {
-        if (matchedSong.al) unifiedSong.al = matchedSong.al;
-        if (matchedSong.album) unifiedSong.album = matchedSong.album;
-    }
-
     if (coverUrl) {
-        if (unifiedSong.album) unifiedSong.album.picUrl = coverUrl;
-        if (unifiedSong.al) unifiedSong.al.picUrl = coverUrl;
+        if (unifiedSong.album) {
+            unifiedSong.album.coverUrl = coverUrl;
+        }
     }
 
     return unifiedSong;
 }
 
-export function buildLocalQueue(queue: LocalSong[], currentSong?: UnifiedSong): UnifiedSong[] {
+export function buildLocalQueue(
+    queue: LocalSong[],
+    currentSong?: UnifiedSong,
+    catalog?: LocalLibraryDisplayCatalog,
+): UnifiedSong[] {
+    const catalogIndex = catalog
+        ? buildLocalLibraryIndex(catalog.entities, catalog.assignments)
+        : undefined;
     const convertedQueue = queue.map(song => {
-        const useMatchedLyrics =
-            song.lyricsSource === 'online'
-            || (!song.lyricsSource && !song.hasLocalLyrics && !song.hasEmbeddedLyrics);
-
-        return {
-            id: getLocalSongId(song),
-            name: song.title || song.fileName,
-            artists: song.artist ? [{ id: 0, name: song.artist }] : [],
-            album: song.album ? { id: 0, name: song.album } : { id: 0, name: '' },
-            duration: song.duration,
-            isPureMusic: useMatchedLyrics ? song.matchedIsPureMusic : false,
-            ar: song.artist ? [{ id: 0, name: song.artist }] : [],
-            al: song.album ? { id: 0, name: song.album, picUrl: song.matchedCoverUrl } : undefined,
-            dt: song.duration,
-            isLocal: true,
-            localData: song
-        } as UnifiedSong;
+        return applyLocalLibraryEntityDisplay(buildUnifiedLocalSong({
+            localSong: song,
+            matchedSong: null,
+            coverUrl: song.useOnlineCover ? song.onlineMetadata?.coverUrl || null : null,
+            preferOnlineMetadata: false,
+        }), catalog, catalogIndex);
     });
 
     if (!currentSong) {
@@ -119,7 +205,7 @@ export function buildLocalQueue(queue: LocalSong[], currentSong?: UnifiedSong): 
 
     return convertedQueue.map(song => {
         if (song.id === currentSong.id) {
-            return currentSong;
+            return applyLocalLibraryEntityDisplay(currentSong, catalog, catalogIndex);
         }
         return song;
     });
@@ -138,28 +224,22 @@ export function buildUnifiedNavidromeSong(
 ): SongResult {
     const displayArtists = (options?.useOnlineMetadata && options.matchedArtists)
         ? [{ id: 0, name: options.matchedArtists }]
-        : (navidromeSong.artists || navidromeSong.ar || []);
-    const displayAlbum = navidromeSong.album || (navidromeSong.al ? {
-        id: navidromeSong.al.id,
-        name: navidromeSong.al.name,
-        picUrl: navidromeSong.al.picUrl
-    } : { id: 0, name: '' });
-    const displayAl = options?.coverUrl
-        ? { ...(navidromeSong.al || displayAlbum || { id: 0, name: '' }), picUrl: options.coverUrl }
-        : (navidromeSong.al || displayAlbum);
+        : (navidromeSong.artists || []);
+    const displayAlbum = navidromeSong.album || { id: 0, name: '' };
+    const displayAlbumWithCover = options?.coverUrl
+        ? { ...displayAlbum, coverUrl: options.coverUrl }
+        : displayAlbum;
 
     return {
         id: navidromeSong.id,
         name: (options?.useOnlineMetadata && options.matchedAlbumName) ? options.matchedAlbumName : navidromeSong.name,
         artists: displayArtists,
-        album: displayAlbum,
-        duration: navidromeSong.duration || navidromeSong.dt || 0,
+        album: displayAlbumWithCover,
+        durationMs: navidromeSong.durationMs || 0,
         isPureMusic: navidromeSong.lyricsSource === 'online' ? navidromeSong.matchedIsPureMusic : false,
-        ar: navidromeSong.ar || displayArtists,
-        al: displayAl,
-        dt: navidromeSong.dt,
         isNavidrome: true,
         navidromeData: navidromeSong,
+        sourceRef: { kind: 'navidrome', mediaId: navidromeSong.navidromeData.id },
         matchedLyricsSource: options?.matchedLyricsSource,
         matchedLyricsProviderPlatform: options?.matchedLyricsProviderPlatform
     } as any;
@@ -169,15 +249,13 @@ export function buildNavidromeQueue(queue: NavidromeSong[], currentSong?: SongRe
     const convertedQueue = queue.map(song => ({
         id: song.id,
         name: song.name,
-        artists: song.artists || song.ar || [],
-        album: song.album || (song.al ? { id: song.al.id, name: song.al.name, picUrl: song.al.picUrl } : { id: 0, name: '' }),
-        duration: song.duration || song.dt || 0,
+        artists: song.artists || [],
+        album: song.album || { id: 0, name: '' },
+        durationMs: song.durationMs || 0,
         isPureMusic: song.lyricsSource === 'online' ? song.matchedIsPureMusic : false,
-        ar: song.ar || [],
-        al: song.al,
-        dt: song.dt,
         isNavidrome: true,
-        navidromeData: song
+        navidromeData: song,
+        sourceRef: { kind: 'navidrome', mediaId: song.navidromeData.id },
     } as any));
 
     if (!currentSong) {

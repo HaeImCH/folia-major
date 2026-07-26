@@ -5,9 +5,10 @@ import { LyricParserFactory } from '../utils/lyrics/LyricParserFactory';
 import { getFromCache, removeFromCache, saveToCache } from '../services/db';
 import { NowPlayingProvider } from '../services/nowPlayingProvider';
 import { SpotifyProvider } from '../services/spotifyProvider';
+import { usePlayerCapSource } from './usePlayerCapSource';
 import { findLatestActiveLineIndex, hasRenderableLyrics } from '../utils/appPlaybackHelpers';
 import { buildStageEntryKey, getStageLyricsTimelineBounds } from '../utils/appStageHelpers';
-import { isStagePlaybackSong } from '../utils/appPlaybackGuards';
+import { getPlaybackSongKey, isStagePlaybackSong } from '../utils/appPlaybackGuards';
 import {
     buildNowPlayingContentLoadKey,
     clampNowPlayingTimeSec,
@@ -44,10 +45,15 @@ import type {
 type SetState<T> = Dispatch<SetStateAction<T>>;
 
 type UseStagePlaybackControllerParams = {
-    t: (key: string) => string;
+    t: (key: string, options?: Record<string, unknown>) => string;
     isDev: boolean;
     isElectronWindow: boolean;
     enableNowPlayingStage: boolean;
+    enablePlayerCapStage: boolean;
+    playerCapHost: string;
+    playerCapPlayer: string;
+    playerCapTimeBasis: 'timestamp' | 'play_time';
+    playerCapSticky: boolean;
     activePlaybackContext: 'main' | 'stage';
     setActivePlaybackContext: SetState<'main' | 'stage'>;
     currentSong: SongResult | null;
@@ -61,7 +67,7 @@ type UseStagePlaybackControllerParams = {
     currentLineIndex: number;
     currentTime: MotionValue<number>;
     audioRef: RefObject<HTMLAudioElement | null>;
-    currentSongRef: MutableRefObject<number | null>;
+    currentSongRef: MutableRefObject<string | number | null>;
     shouldAutoPlayRef: MutableRefObject<boolean>;
     pendingResumeTimeRef: MutableRefObject<number | null>;
     lastAudioRecoverySourceRef: MutableRefObject<string | null>;
@@ -105,6 +111,11 @@ export function useStagePlaybackController({
     isDev,
     isElectronWindow,
     enableNowPlayingStage,
+    enablePlayerCapStage,
+    playerCapHost,
+    playerCapPlayer,
+    playerCapTimeBasis,
+    playerCapSticky,
     activePlaybackContext,
     setActivePlaybackContext,
     currentSong,
@@ -197,12 +208,26 @@ export function useStagePlaybackController({
     const stageMediaSession = stageStatus?.mediaSession ?? null;
     const stageSource: StageSource | null = isElectronWindow
         ? (stageStatus?.modeEnabled ? (stageStatus?.source ?? 'stage-api') : null)
-        : (enableNowPlayingStage ? 'now-playing' : null);
+        : (enablePlayerCapStage ? 'playercap' : (enableNowPlayingStage ? 'now-playing' : null));
     const isExternalPlaybackSource = stageSource === 'now-playing' || stageSource === 'spotify';
     const isNowPlayingStageActive = activePlaybackContext === 'stage' && isExternalPlaybackSource;
     const isSpotifyStageActive = activePlaybackContext === 'stage' && stageSource === 'spotify';
     const shouldPublishNowPlayingState = isDev || isNowPlayingStageActive;
     shouldPublishNowPlayingStateRef.current = shouldPublishNowPlayingState;
+
+    // === PlayerCap stage source (third source): reuses usePlayerCapSource, passively mirrored to the main playback pane; the OBS SSE source inherits it automatically, source-agnostic ===
+    const isPlayerCapStageActive = activePlaybackContext === 'stage' && stageSource === 'playercap';
+    const { state: playerCapState, players: playerCapPlayers, getCurrentTimeSec: getPlayerCapTimeSec } = usePlayerCapSource({
+        enabled: stageSource === 'playercap',
+        host: playerCapHost,
+        player: playerCapPlayer,
+        timeBasis: playerCapTimeBasis,
+        sticky: playerCapSticky,
+    });
+    const getPlayerCapDisplayTime = useCallback((nowMs = Date.now()) => getPlayerCapTimeSec(nowMs), [getPlayerCapTimeSec]);
+    const playerCapConnectionStatus = playerCapState.connectionStatus;
+    const playerCapSongIdRef = useRef(-1);
+    const playerCapSongKeyRef = useRef('');
 
     const buildPlaybackSnapshot = useCallback((): PlaybackSnapshot => ({
         currentSong,
@@ -302,13 +327,11 @@ export function useStagePlaybackController({
         id: -Math.max(1, Math.floor(session.updatedAt || Date.now())),
         name: session.title || 'Stage Session',
         artists: [{ id: 0, name: session.artist || 'Stage' }],
-        album: { id: 0, name: session.album || 'Stage', picUrl: session.coverArtUrl || session.coverUrl || undefined },
-        duration: Math.max(0, Math.floor(session.durationMs || 0)),
-        al: { id: 0, name: session.album || 'Stage', picUrl: session.coverArtUrl || session.coverUrl || undefined },
-        ar: [{ id: 0, name: session.artist || 'Stage' }],
-        dt: Math.max(0, Math.floor(session.durationMs || 0)),
+        album: { id: 0, name: session.album || 'Stage', coverUrl: session.coverArtUrl || session.coverUrl || undefined },
+        durationMs: Math.max(0, Math.floor(session.durationMs || 0)),
         sourceType: 'cloud',
         isStage: true,
+        sourceRef: { kind: 'stage', mediaId: session.id },
         stageData: session,
     } as SongResult), []);
 
@@ -524,13 +547,11 @@ export function useStagePlaybackController({
         id: -Math.max(1, Math.floor(session.updatedAt || Date.now())),
         name: session.title || lyricData.title || 'Stage Lyrics',
         artists: [{ id: 0, name: session.artist || lyricData.artist || 'Stage' }],
-        album: { id: 0, name: session.album || 'Stage', picUrl: undefined },
-        duration: Math.max(0, Math.floor(getStageLyricsTimelineBounds(lyricData).endTimeSec * 1000)),
-        al: { id: 0, name: session.album || 'Stage', picUrl: undefined },
-        ar: [{ id: 0, name: session.artist || lyricData.artist || 'Stage' }],
-        dt: Math.max(0, Math.floor(getStageLyricsTimelineBounds(lyricData).endTimeSec * 1000)),
+        album: { id: 0, name: session.album || 'Stage' },
+        durationMs: Math.max(0, Math.floor(getStageLyricsTimelineBounds(lyricData).endTimeSec * 1000)),
         sourceType: 'cloud',
         isStage: true,
+        sourceRef: { kind: 'stage', mediaId: String(session.updatedAt) },
         stageData: session,
     } as SongResult), []);
 
@@ -559,7 +580,7 @@ export function useStagePlaybackController({
 
         resetStageLyricsClock();
         const stageSong = buildStagePlaybackSong(session);
-        currentSongRef.current = stageSong.id;
+        currentSongRef.current = getPlaybackSongKey(stageSong);
         setIsLyricsLoading(false);
         let parsedLyrics: LyricData | null = null;
         if (session.lyricsText?.trim()) {
@@ -641,7 +662,7 @@ export function useStagePlaybackController({
         clearPlaybackSurface();
         shouldAutoPlayRef.current = false;
         pendingResumeTimeRef.current = null;
-        currentSongRef.current = stageSong.id;
+        currentSongRef.current = getPlaybackSongKey(stageSong);
         setCurrentSong(stageSong);
         setCachedCoverUrl(null);
         setAudioSrc(null);
@@ -681,6 +702,7 @@ export function useStagePlaybackController({
         track: NowPlayingTrackSnapshot | null,
         lyricPayload: NowPlayingLyricPayload | null,
         requestId: number,
+        source: 'now-playing' | 'spotify',
     ) => {
         const durationSec = Math.max(0, (track?.durationMs ?? lyricPayload?.durationMs ?? 0) / 1000);
         if (isDev) {
@@ -705,7 +727,7 @@ export function useStagePlaybackController({
             }
         }
 
-        if (!parsedLyrics && stageSource === 'spotify' && track) {
+        if (!parsedLyrics && source === 'spotify' && track) {
             setIsLyricsLoading(true);
             try {
                 const matched = await autoMatchBestLyric(
@@ -729,7 +751,7 @@ export function useStagePlaybackController({
             return;
         }
 
-        const renderableLyrics = stageSource === 'spotify'
+        const renderableLyrics = source === 'spotify'
             ? (hasSynchronizedLyricTimeline(parsedLyrics) ? parsedLyrics : null)
             : (hasRenderableLyrics(parsedLyrics) ? parsedLyrics : null);
         const fallbackTitle = track?.title || lyricPayload?.title || 'Now Playing';
@@ -738,7 +760,7 @@ export function useStagePlaybackController({
         const fallbackCoverUrl = track?.coverUrl || null;
         const resolvedDurationSec = durationSec || (renderableLyrics ? getStageLyricsTimelineBounds(renderableLyrics).endTimeSec : 0);
 
-        if (stageSource === 'spotify' && track && !renderableLyrics) {
+        if (source === 'spotify' && track && !renderableLyrics) {
             shouldAutoPlayRef.current = false;
             pendingResumeTimeRef.current = null;
             currentSongRef.current = null;
@@ -753,7 +775,7 @@ export function useStagePlaybackController({
             setCurrentLineIndex(-1);
             setStatusMsg({
                 type: 'error',
-text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
+                text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
             });
             return;
         }
@@ -762,18 +784,16 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
             id: -Math.max(1, Math.floor(Date.now())),
             name: fallbackTitle,
             artists: [{ id: 0, name: fallbackArtist }],
-            album: { id: 0, name: fallbackAlbum || 'Now Playing', picUrl: fallbackCoverUrl || undefined },
-            duration: Math.max(0, Math.floor(resolvedDurationSec * 1000)),
-            al: { id: 0, name: fallbackAlbum || 'Now Playing', picUrl: fallbackCoverUrl || undefined },
-            ar: [{ id: 0, name: fallbackArtist }],
-            dt: Math.max(0, Math.floor(resolvedDurationSec * 1000)),
+            album: { id: 0, name: fallbackAlbum || 'Now Playing', coverUrl: fallbackCoverUrl || undefined },
+            durationMs: Math.max(0, Math.floor(resolvedDurationSec * 1000)),
             sourceType: 'cloud',
             isStage: true,
+            sourceRef: { kind: 'stage', mediaId: String(track?.id || `${fallbackTitle}|${fallbackArtist}`) },
         } as SongResult) : null;
 
         shouldAutoPlayRef.current = false;
         pendingResumeTimeRef.current = null;
-        currentSongRef.current = fallbackSong?.id ?? null;
+        currentSongRef.current = fallbackSong ? getPlaybackSongKey(fallbackSong) : null;
         setCurrentSong(fallbackSong);
         setCachedCoverUrl(fallbackCoverUrl);
         setAudioSrc(null);
@@ -809,7 +829,6 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
         setIsLyricsLoading,
         setLyrics,
         setPlayQueue,
-        stageSource,
         shouldAutoPlayRef,
         syncNowPlayingDisplaySurface,
         setStatusMsg,
@@ -832,6 +851,7 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
         setActivePlaybackContext('stage');
 
         if (handoff.stage.source === 'now-playing' || handoff.stage.source === 'spotify') {
+            const handoffSource = handoff.stage.source;
             const nextNowPlaying = handoff.nowPlaying;
             nowPlayingTrackRef.current = nextNowPlaying.track;
             nowPlayingLyricPayloadRef.current = nextNowPlaying.lyricPayload;
@@ -861,10 +881,18 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
             setPlayerState(nextNowPlaying.paused ? PlayerState.PAUSED : PlayerState.PLAYING);
 
             if (nextNowPlaying.track || nextNowPlaying.lyricPayload) {
-                nowPlayingContentLoadKeyRef.current = null;
+                nowPlayingContentLoadKeyRef.current = buildNowPlayingContentLoadKey(
+                    nextNowPlaying.track,
+                    nextNowPlaying.lyricPayload,
+                );
                 const requestId = nowPlayingContentLoadRequestIdRef.current + 1;
                 nowPlayingContentLoadRequestIdRef.current = requestId;
-                await loadNowPlayingIntoPlayback(nextNowPlaying.track, nextNowPlaying.lyricPayload, requestId);
+                await loadNowPlayingIntoPlayback(
+                    nextNowPlaying.track,
+                    nextNowPlaying.lyricPayload,
+                    requestId,
+                    handoffSource,
+                );
                 syncNowPlayingDisplaySurface(displayTimeSec);
             } else if (stageSnapshot) {
                 applyPlaybackSnapshot(stageSnapshot);
@@ -931,7 +959,7 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
     }, []);
 
     const openStagePlayer = useCallback(async () => {
-        if (isExternalPlaybackSource && activePlaybackContext === 'stage') {
+        if ((isExternalPlaybackSource || stageSource === 'playercap') && activePlaybackContext === 'stage') {
             navigateToPlayer();
             return;
         }
@@ -942,7 +970,17 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
             stagePlaybackSnapshotRef.current = buildPlaybackSnapshot();
         }
 
+        if (stageSource === 'playercap') {
+            // Passive source: switch to the stage context and navigate; the main playback pane is filled by the reactive mirror effect.
+            clearMainPlaybackContext();
+            stagePlaybackSnapshotRef.current = null;
+            setActivePlaybackContext('stage');
+            navigateToPlayer();
+            return;
+        }
+
         if (isExternalPlaybackSource) {
+            const externalSource = stageSource === 'spotify' ? 'spotify' : 'now-playing';
             clearMainPlaybackContext();
             stagePlaybackSnapshotRef.current = null;
             setActivePlaybackContext('stage');
@@ -952,9 +990,18 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
                 setNowPlayingPaused(nowPlayingPausedRef.current);
             }
             if (nowPlayingTrackRef.current || nowPlayingLyricPayloadRef.current) {
+                nowPlayingContentLoadKeyRef.current = buildNowPlayingContentLoadKey(
+                    nowPlayingTrackRef.current,
+                    nowPlayingLyricPayloadRef.current,
+                );
                 const requestId = nowPlayingContentLoadRequestIdRef.current + 1;
                 nowPlayingContentLoadRequestIdRef.current = requestId;
-                void loadNowPlayingIntoPlayback(nowPlayingTrackRef.current, nowPlayingLyricPayloadRef.current, requestId);
+                void loadNowPlayingIntoPlayback(
+                    nowPlayingTrackRef.current,
+                    nowPlayingLyricPayloadRef.current,
+                    requestId,
+                    externalSource,
+                );
             }
             navigateToPlayer();
             if (!nowPlayingTrackRef.current && !nowPlayingLyricPayloadRef.current) {
@@ -1016,7 +1063,7 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
             return;
         }
 
-        if (isExternalPlaybackSource) {
+        if (isExternalPlaybackSource || stageSource === 'playercap') {
             stagePlaybackSnapshotRef.current = null;
             setActivePlaybackContext('main');
             clearMainPlaybackContext();
@@ -1026,14 +1073,14 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
         stagePlaybackSnapshotRef.current = buildPlaybackSnapshot();
         setActivePlaybackContext('main');
         applyPlaybackSnapshot(mainPlaybackSnapshotRef.current);
-    }, [activePlaybackContext, applyPlaybackSnapshot, buildPlaybackSnapshot, clearMainPlaybackContext, isExternalPlaybackSource, setActivePlaybackContext]);
+    }, [activePlaybackContext, applyPlaybackSnapshot, buildPlaybackSnapshot, clearMainPlaybackContext, isExternalPlaybackSource, setActivePlaybackContext, stageSource]);
 
     const interruptStagePlaybackForMainTransition = useCallback(() => {
         if (activePlaybackContext !== 'stage') {
             return null;
         }
 
-        if (isExternalPlaybackSource) {
+        if (isExternalPlaybackSource || stageSource === 'playercap') {
             stagePlaybackSnapshotRef.current = null;
             setActivePlaybackContext('main');
             clearMainPlaybackContext();
@@ -1048,7 +1095,7 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
         applyPlaybackSnapshot(restoredMainSnapshot);
 
         return restoredMainSnapshot;
-    }, [activePlaybackContext, applyPlaybackSnapshot, buildPlaybackSnapshot, clearMainPlaybackContext, isExternalPlaybackSource, setActivePlaybackContext]);
+    }, [activePlaybackContext, applyPlaybackSnapshot, buildPlaybackSnapshot, clearMainPlaybackContext, isExternalPlaybackSource, setActivePlaybackContext, stageSource]);
 
     const clearStagePlaybackSession = useCallback(() => {
         stagePlaybackSnapshotRef.current = null;
@@ -1087,8 +1134,8 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
             nowPlayingProviderRef.current?.stop();
             nowPlayingProviderRef.current = null;
             nowPlayingContentLoadKeyRef.current = null;
-            nowPlayingContentLoadRequestIdRef.current = 0;
-            nowPlayingPreciseQueryRequestIdRef.current = 0;
+            nowPlayingContentLoadRequestIdRef.current += 1;
+            nowPlayingPreciseQueryRequestIdRef.current += 1;
             nowPlayingTrackRef.current = null;
             nowPlayingLyricPayloadRef.current = null;
             nowPlayingPausedRef.current = true;
@@ -1114,13 +1161,13 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
 
         const providerCallbacks = {
             onConnectionStatusChange: setNowPlayingConnectionStatus,
-            onTrack: (track) => {
+            onTrack: (track: NowPlayingTrackSnapshot | null) => {
                 nowPlayingTrackRef.current = track;
                 if (shouldPublishNowPlayingStateRef.current) {
                     setNowPlayingTrack(track);
                 }
             },
-            onPauseState: (isPaused) => {
+            onPauseState: (isPaused: boolean) => {
                 nowPlayingPausedRef.current = isPaused;
                 if (shouldPublishNowPlayingStateRef.current) {
                     setNowPlayingPaused(isPaused);
@@ -1252,13 +1299,14 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
             return;
         }
 
+        const externalSource = stageSource === 'spotify' ? 'spotify' : 'now-playing';
         const nextContentLoadKey = buildNowPlayingContentLoadKey(nowPlayingTrack, nowPlayingLyricPayload);
         if (!nextContentLoadKey) {
             if (nowPlayingContentLoadKeyRef.current) {
                 nowPlayingContentLoadKeyRef.current = null;
                 const requestId = nowPlayingContentLoadRequestIdRef.current + 1;
                 nowPlayingContentLoadRequestIdRef.current = requestId;
-                void loadNowPlayingIntoPlayback(null, null, requestId);
+                void loadNowPlayingIntoPlayback(null, null, requestId, externalSource);
             }
             return;
         }
@@ -1269,7 +1317,7 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
         nowPlayingContentLoadKeyRef.current = nextContentLoadKey;
         const requestId = nowPlayingContentLoadRequestIdRef.current + 1;
         nowPlayingContentLoadRequestIdRef.current = requestId;
-        void loadNowPlayingIntoPlayback(nowPlayingTrack, nowPlayingLyricPayload, requestId);
+        void loadNowPlayingIntoPlayback(nowPlayingTrack, nowPlayingLyricPayload, requestId, externalSource);
     }, [
         activePlaybackContext,
         buildNowPlayingContentLoadKey,
@@ -1373,6 +1421,75 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
         setPlayerState(current => current === nextPlayerState ? current : nextPlayerState);
     }, [isNowPlayingStageActive, nowPlayingPaused, setPlayerState]);
 
+    // PlayerCap → main playback pane (passive mirror). Lyrics are already LyricData (no parsing); cover/duration/track update with each event, audio is left empty so <audio> does not hijack the clock.
+    useEffect(() => {
+        if (stageSource !== 'playercap' || activePlaybackContext !== 'stage') {
+            return;
+        }
+        const track = playerCapState.track;
+        const nextLyrics = playerCapState.lyrics;
+        // Mid source-switch (the active player has changed, new content hasn't arrived yet for that brief window): keep the previous song's content to avoid flashing the empty-state overlay in the main view
+        // (Folia's empty state depends on currentSong=null). Only genuine idle (activePlayer is empty) actually clears. Consistent with the OBS output's look and feel.
+        if (!track && !nextLyrics && playerCapState.activePlayer) {
+            return;
+        }
+        const durationSec = playerCapState.clock.durationSec;
+        const key = `${track?.title ?? ''}|${track?.name ?? ''}|${track?.artist ?? ''}`;
+        if (key !== playerCapSongKeyRef.current) {
+            playerCapSongKeyRef.current = key;
+            playerCapSongIdRef.current -= 1; // one stable negative id per new song, triggers the main app's song-change side effects (theme/offset/etc.)
+        }
+        const durationMs = Math.max(0, Math.floor(durationSec * 1000));
+        const song: SongResult | null = (track || nextLyrics) ? ({
+            id: playerCapSongIdRef.current,
+            name: track?.name || track?.title || 'PlayerCap',
+            artists: [{ id: 0, name: track?.artist || '' }],
+            album: { id: 0, name: '', coverUrl: track?.coverUrl || undefined },
+            durationMs,
+            sourceType: 'cloud',
+            isStage: true,
+            sourceRef: { kind: 'stage', mediaId: key },
+        } as SongResult) : null;
+
+        shouldAutoPlayRef.current = false;
+        pendingResumeTimeRef.current = null;
+        currentSongRef.current = song?.id ?? null;
+        setCurrentSong(song);
+        setCachedCoverUrl(track?.coverUrl ?? null);
+        setAudioSrc(null);
+        setPlayQueue([]);
+        setIsFmMode(false);
+        setIsLyricsLoading(false);
+        setLyrics(nextLyrics);
+        setDuration(durationSec);
+    }, [
+        stageSource,
+        activePlaybackContext,
+        playerCapState.track,
+        playerCapState.lyrics,
+        playerCapState.activePlayer,
+        playerCapState.clock.durationSec,
+        currentSongRef,
+        pendingResumeTimeRef,
+        setAudioSrc,
+        setCachedCoverUrl,
+        setCurrentSong,
+        setDuration,
+        setIsFmMode,
+        setIsLyricsLoading,
+        setLyrics,
+        setPlayQueue,
+        shouldAutoPlayRef,
+    ]);
+
+    useEffect(() => {
+        if (!isPlayerCapStageActive) {
+            return;
+        }
+        const nextPlayerState = playerCapState.playerState === 'playing' ? PlayerState.PLAYING : PlayerState.PAUSED;
+        setPlayerState(current => current === nextPlayerState ? current : nextPlayerState);
+    }, [isPlayerCapStageActive, playerCapState.playerState, setPlayerState]);
+
     useEffect(() => {
         if (activePlaybackContext !== 'stage' || stageSource) {
             return;
@@ -1399,6 +1516,10 @@ text: t('status.spotifyNoSynchronizedLyrics', { title: track.title }),
         nowPlayingDebugInfo,
         isNowPlayingStageActive,
         isSpotifyStageActive,
+        isPlayerCapStageActive,
+        getPlayerCapDisplayTime,
+        playerCapConnectionStatus,
+        playerCapPlayers,
         mainPlaybackSnapshotRef,
         stageLyricsClockRef,
         resetNowPlayingClock,

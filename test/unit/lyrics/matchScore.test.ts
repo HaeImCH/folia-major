@@ -25,7 +25,7 @@ describe('calculateMatchScore', () => {
                     { id: 3, name: 'nayuta' }
                 ],
                 album: { id: 1, name: 'Night of Bloom' },
-                duration: 286000
+                durationMs: 286000
             }
         );
 
@@ -45,7 +45,7 @@ describe('calculateMatchScore', () => {
                 name: 'Night of Bloom',
                 artists: [{ id: 1, name: 'Ayrex' }],
                 album: { id: 1, name: 'First Love' },
-                duration: 286000
+                durationMs: 286000
             }
         );
 
@@ -65,7 +65,7 @@ describe('calculateMatchScore', () => {
                 name: 'SAKURAスキップ',
                 artists: [{ id: 1, name: 'fourfolium' }],
                 album: { id: 1, name: 'TVアニメ「NEW GAME!」オープニングテーマ「SAKURAステップ」' },
-                duration: 249000
+                durationMs: 249000
             }
         );
 
@@ -89,7 +89,7 @@ describe('calculateMatchScore', () => {
                 name: 'SAKURAスキップ (樱花跳)',
                 artists: [{ id: 1, name: 'fourfolium' }],
                 album: { id: 1, name: 'TVアニメ「NEW GAME!」オープニングテーマ「SAKURAステップ」' },
-                duration: 249000
+                durationMs: 249000
             }
         );
         const instrumentalDetails = calculateMatchScoreDetails(
@@ -104,7 +104,7 @@ describe('calculateMatchScore', () => {
                 name: 'SAKURAスキップ (instrumental)',
                 artists: [{ id: 1, name: 'fourfolium' }],
                 album: { id: 1, name: 'TVアニメ「NEW GAME!」オープニングテーマ「SAKURAステップ」' },
-                duration: 249000
+                durationMs: 249000
             }
         );
 
@@ -126,7 +126,7 @@ describe('calculateMatchScore', () => {
                 name: 'Song Title',
                 artists: [{ id: 1, name: 'Artist Name' }],
                 album: { id: 1, name: 'Album Name' },
-                duration: 200000
+                durationMs: 200000
             }
         );
         const wrongDurationScore = calculateMatchScore(
@@ -141,12 +141,29 @@ describe('calculateMatchScore', () => {
                 name: 'Song Title',
                 artists: [{ id: 1, name: 'Artist Name' }],
                 album: { id: 1, name: 'Album Name' },
-                duration: 245000
+                durationMs: 245000
             }
         );
 
         expect(exactDurationScore).toBe(100);
         expect(wrongDurationScore).toBeLessThan(75);
+    });
+
+    it('marks duration as matched only when the difference is at most three seconds', () => {
+        const target = {
+            title: 'Song Title',
+            artist: 'Artist Name',
+            durationMs: 200000
+        };
+        const result = {
+            id: 303,
+            name: 'Song Title',
+            artists: [{ id: 1, name: 'Artist Name' }],
+            album: { id: 1, name: 'Album Name' }
+        };
+
+        expect(calculateMatchScoreDetails(target, { ...result, durationMs: 203000 }).durationMatched).toBe(true);
+        expect(calculateMatchScoreDetails(target, { ...result, durationMs: 203001 }).durationMatched).toBe(false);
     });
 
     it('strips feat. tags from album and handles partial artist arrays safely', () => {
@@ -162,7 +179,7 @@ describe('calculateMatchScore', () => {
                 name: 'イグニッション (feat. Yuaru、Nenne)',
                 artists: [{ id: 1, name: '*Luna' }],
                 album: { id: 1, name: 'イグニッション (feat. Yuaru、Nenne)' },
-                duration: 200000
+                durationMs: 200000
             }
         );
 
@@ -185,7 +202,7 @@ describe('calculateMatchScore', () => {
                 name: '深蓝',
                 artists: [{ id: 1, name: 'RURUTIA' }],
                 album: { id: 1, name: 'NODE from R' },
-                duration: 200000
+                durationMs: 200000
             }
         );
 

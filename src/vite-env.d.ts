@@ -5,6 +5,7 @@ declare global {
   const __GIT_BRANCH__: string;
   const __APP_VERSION__: string;
   const __APP_VERSION_LABEL__: string;
+  const __APP_RELEASE_CHANNEL__: string;
 
   interface ElectronCacheDirectoryResult {
     path: string;
@@ -17,6 +18,8 @@ declare global {
     data?: Uint8Array | ArrayBuffer | null;
     mimeType?: string | null;
   }
+
+  type ElectronKugouOperation = import('./services/onlineMusic/kugouTransport').KugouOperation;
 
   interface ElectronAudioCacheStats {
     size: number;
@@ -36,6 +39,11 @@ declare global {
     port: number | null;
     error: string | null;
     updatedAt: number;
+  }
+
+  interface ElectronKugouApiStatus {
+    available: boolean;
+    error: string | null;
   }
 
   interface ElectronTaskbarControlState {
@@ -139,6 +147,12 @@ declare global {
     discordPresenceEnabled: boolean;
   }
 
+  interface ElectronVoiceInputPauseStatus {
+    active: boolean;
+    enabled: boolean;
+    supported: boolean;
+  }
+
   interface ElectronDiscordPresenceSnapshot {
     hasTrack: boolean;
     title: string | null;
@@ -184,6 +198,8 @@ declare global {
     status: ElectronUpdateStatusValue;
     supported: boolean;
     updateCheckSupported: boolean;
+    updateCheckSupportReason?: 'system' | 'channel' | null;
+    platform?: string;
     updateCheckEnabled: boolean;
     autoUpdateEnabled: boolean;
     currentVersion: string;
@@ -201,7 +217,7 @@ declare global {
   }
 
   type StageActiveEntryKind = 'lyrics' | 'media';
-  type StageSource = 'stage-api' | 'now-playing' | 'spotify';
+  type StageSource = 'stage-api' | 'now-playing' | 'playercap' | 'spotify';
 
   interface ElectronSpotifyStatus {
     configured: boolean;
@@ -510,6 +526,11 @@ declare global {
       getAudioCacheUsage: () => Promise<number>;
       getAudioCacheStats: () => Promise<ElectronAudioCacheStats>;
       clearAudioCache: () => Promise<boolean>;
+      getCoverCache: (cacheKey: string) => Promise<ElectronAudioCacheEntry>;
+      saveCoverCache: (cacheKey: string, data: ArrayBuffer, mimeType?: string) => Promise<boolean>;
+      removeCoverCache: (cacheKey: string) => Promise<boolean>;
+      getCoverCacheUsage: () => Promise<number>;
+      clearCoverCache: () => Promise<boolean>;
       generateTheme: (lyricsText: string, options?: { isPureMusic?: boolean; songTitle?: string }) => Promise<any>;
       fetchLyricProxy: (
         url: string,
@@ -522,6 +543,11 @@ declare global {
       getNeteasePort: () => Promise<number>;
       getNeteaseApiStatus: () => Promise<ElectronNeteaseApiStatus>;
       onNeteaseApiStatusChanged: (callback: (status: ElectronNeteaseApiStatus) => void) => () => void;
+      getKugouApiStatus: () => Promise<ElectronKugouApiStatus>;
+      kugouRequest: (
+        operation: ElectronKugouOperation,
+        params?: Record<string, string | number | boolean | undefined>,
+      ) => Promise<unknown>;
       minimizeWindow: () => Promise<boolean>;
       toggleMaximizeWindow: () => Promise<boolean>;
       toggleFullscreenWindow: () => Promise<boolean>;
@@ -562,6 +588,8 @@ declare global {
       getSpotifyPlayback: () => Promise<ElectronSpotifyPlaybackResponse>;
       controlSpotifyPlayback: (command: ElectronSpotifyPlaybackControlCommand) => Promise<ElectronSpotifyPlaybackControlResponse>;
       onSpotifyStatusChanged: (callback: (status: ElectronSpotifyStatus) => void) => () => void;
+      getVoiceInputPauseStatus: () => Promise<ElectronVoiceInputPauseStatus>;
+      onVoiceInputStateChanged: (callback: (state: ElectronVoiceInputPauseStatus) => void) => () => void;
       onPlaybackSyncBridgeStatusChanged: (callback: (status: ElectronPlaybackSyncBridgeStatus) => void) => () => void;
       onDiscordPresenceStatusChanged: (callback: (status: ElectronDiscordPresenceStatus) => void) => () => void;
       onObsBrowserSourceStatusChanged: (callback: (status: ElectronObsBrowserSourceStatus) => void) => () => void;

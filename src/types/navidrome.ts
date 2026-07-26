@@ -77,6 +77,12 @@ export interface SubsonicSong {
     type: 'music' | 'podcast' | 'audiobook';
     isVideo: boolean;
     starred?: string;
+    replayGain?: {
+        trackGain?: number;
+        albumGain?: number;
+        trackPeak?: number;
+        albumPeak?: number;
+    };
 }
 
 // Album List Response
@@ -89,6 +95,10 @@ export interface AlbumList2Response {
 // Album Response
 export interface AlbumResponse {
     album: SubsonicAlbum;
+}
+
+export interface SongResponse {
+    song: SubsonicSong;
 }
 
 export interface SubsonicPlaylist {
@@ -272,12 +282,39 @@ export interface StructuredLyricLine {
     value: string;
 }
 
+export interface StructuredLyricCue {
+    start?: number;
+    end?: number;
+    value: string;
+    byteStart?: number;
+    byteEnd?: number;
+}
+
+export interface StructuredLyricCueLine {
+    index: number;
+    start?: number;
+    end?: number;
+    value: string;
+    agentId?: string;
+    cue?: StructuredLyricCue[];
+}
+
+export interface StructuredLyricAgent {
+    id: string;
+    role?: string;
+    name?: string;
+}
+
 export interface StructuredLyric {
-    displayArtist: string;
-    displayTitle: string;
-    lang: string;
+    displayArtist?: string;
+    displayTitle?: string;
+    lang?: string;
+    kind?: 'main' | 'translation' | 'pronunciation' | string;
     line: StructuredLyricLine[];
-    synced: boolean;
+    cueLine?: StructuredLyricCueLine[];
+    agents?: StructuredLyricAgent[];
+    offset?: number;
+    synced?: boolean;
 }
 
 export type NavidromeViewSelection =
@@ -303,6 +340,7 @@ export interface NavidromeSong extends SongResult {
         bitRate?: number;
         suffix: string;
         starred?: string;
+        replayGain?: SubsonicSong['replayGain'];
     };
     // For lyrics matching (similar to local songs)
     matchedSongId?: number;
@@ -315,7 +353,7 @@ export interface NavidromeSong extends SongResult {
     noAutoMatch?: boolean;
     matchedLyricsSource?: LyricProviderSource;
     matchedLyricsProviderPlatform?: AmllDbPlatform;
-    cachedStructuredLyrics?: StructuredLyricLine[];
+    cachedStructuredLyrics?: StructuredLyric | StructuredLyric[] | StructuredLyricLine[];
     cachedPlainLyrics?: string;
 }
 

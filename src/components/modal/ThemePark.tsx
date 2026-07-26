@@ -10,7 +10,6 @@ import {
     DEFAULT_CLASSIC_TUNING,
     DEFAULT_CLADDAGH_TUNING,
     DEFAULT_FUME_TUNING,
-    DEFAULT_MONET_BACKGROUND_TUNING,
     DEFAULT_MONET_TUNING,
     DEFAULT_PARTITA_TUNING,
     AudioBands,
@@ -22,15 +21,12 @@ import {
     CladdaghTuning,
     DualTheme,
     FumeTuning,
-    MonetBackgroundImage,
-    MonetBackgroundTuning,
     MonetPortraitImage,
     MonetTuning,
+    SubtitleContentMode,
     PartitaTuning,
     Theme,
-    UrlBackgroundItem,
     VisualizerMode,
-    VisualizerBackgroundMode,
 } from '../../types';
 import {
     findPreviewPlaceholderLineIndex,
@@ -42,6 +38,7 @@ import {
 import { getVisualizerModeLabel, getVisualizerScopedSeed } from '../visualizer/registry';
 import { normalizeThemeHexColor, sanitizeDualTheme } from '../../services/themeSanitizer';
 import type { VisualizerTuningBundle } from '../visualizer/tuningRegistry';
+import type { VisualizerBackgroundConfig } from '../visualizer/backgrounds/definition';
 
 interface ThemeParkProps {
     initialTheme: DualTheme;
@@ -49,19 +46,16 @@ interface ThemeParkProps {
     visualizerMode: VisualizerMode;
     visualizerTunings?: VisualizerTuningBundle;
     staticMode?: boolean;
-    backgroundOpacity?: number;
     visualizerOpacity?: number;
-    visualizerBackgroundMode?: VisualizerBackgroundMode | null;
-    urlBackgroundList?: UrlBackgroundItem[];
-    urlBackgroundSelectedId?: string | null;
-    monetBackgroundTuning?: MonetBackgroundTuning;
+    backgroundConfig?: VisualizerBackgroundConfig;
     cappellaCustomEmojiImages?: CappellaEmojiImage[];
     cappellaCustomAvatarImages?: CappellaAvatarImage[];
-    monetBackgroundImage?: MonetBackgroundImage | null;
     monetPortraitImage?: MonetPortraitImage | null;
     showSubtitleTranslation?: boolean;
+    subtitleContentMode?: SubtitleContentMode;
     lyricsFontStyle: Theme['fontStyle'];
     lyricsFontScale: number;
+    lyricsFontWeight?: number | null;
     lyricsCustomFontFamily?: string | null;
     onClose: () => void;
     onSaveTheme: (dualTheme: DualTheme) => void;
@@ -112,17 +106,13 @@ const ThemePreviewLayer: React.FC<{
     visualizerTunings?: VisualizerTuningBundle;
     visualizerModeLabel: string;
     staticMode: boolean;
-    backgroundOpacity: number;
     visualizerOpacity: number;
-    visualizerBackgroundMode?: VisualizerBackgroundMode | null;
-    urlBackgroundList: UrlBackgroundItem[];
-    urlBackgroundSelectedId?: string | null;
-    monetBackgroundTuning: MonetBackgroundTuning;
+    backgroundConfig?: VisualizerBackgroundConfig;
     cappellaCustomEmojiImages: CappellaEmojiImage[];
     cappellaCustomAvatarImages: CappellaAvatarImage[];
-    monetBackgroundImage?: MonetBackgroundImage | null;
     monetPortraitImage?: MonetPortraitImage | null;
     showSubtitleTranslation: boolean;
+    subtitleContentMode?: SubtitleContentMode;
     lyricsFontScale: number;
     currentTime: ReturnType<typeof useMotionValue<number>>;
     currentLineIndex: number;
@@ -138,17 +128,13 @@ const ThemePreviewLayer: React.FC<{
     visualizerTunings,
     visualizerModeLabel,
     staticMode,
-    backgroundOpacity,
     visualizerOpacity,
-    visualizerBackgroundMode,
-    urlBackgroundList,
-    urlBackgroundSelectedId,
-    monetBackgroundTuning,
+    backgroundConfig,
     cappellaCustomEmojiImages,
     cappellaCustomAvatarImages,
-    monetBackgroundImage,
     monetPortraitImage,
     showSubtitleTranslation,
+    subtitleContentMode,
     lyricsFontScale,
     currentTime,
     currentLineIndex,
@@ -189,18 +175,14 @@ const ThemePreviewLayer: React.FC<{
                         showText
                         staticMode={staticMode}
                         isPreviewMode
-                        backgroundOpacity={backgroundOpacity}
                         visualizerOpacity={visualizerOpacity}
-                        visualizerBackgroundMode={visualizerBackgroundMode}
-                        urlBackgroundList={urlBackgroundList}
-                        urlBackgroundSelectedId={urlBackgroundSelectedId}
+                        background={backgroundConfig}
                         coverUrl={VIS_PLAYGROUND_PREVIEW_COVER_URL}
                         lyricsFontScale={lyricsFontScale}
                         showSubtitleTranslation={showSubtitleTranslation}
-                        monetBackgroundTuning={monetBackgroundTuning}
+                        subtitleContentMode={subtitleContentMode}
                         cappellaCustomEmojiImages={cappellaCustomEmojiImages}
                         cappellaCustomAvatarImages={cappellaCustomAvatarImages}
-                        monetBackgroundImage={monetBackgroundImage}
                         monetPortraitImage={monetPortraitImage}
                         seed={getVisualizerScopedSeed(visualizerMode, `theme-park-${mode}`)}
                     />
@@ -254,17 +236,13 @@ const ThemePreview: React.FC<{
     visualizerTunings?: VisualizerTuningBundle;
     visualizerModeLabel: string;
     staticMode: boolean;
-    backgroundOpacity: number;
     visualizerOpacity: number;
-    visualizerBackgroundMode?: VisualizerBackgroundMode | null;
-    urlBackgroundList: UrlBackgroundItem[];
-    urlBackgroundSelectedId?: string | null;
-    monetBackgroundTuning: MonetBackgroundTuning;
+    backgroundConfig?: VisualizerBackgroundConfig;
     cappellaCustomEmojiImages: CappellaEmojiImage[];
     cappellaCustomAvatarImages: CappellaAvatarImage[];
-    monetBackgroundImage?: MonetBackgroundImage | null;
     monetPortraitImage?: MonetPortraitImage | null;
     showSubtitleTranslation: boolean;
+    subtitleContentMode?: SubtitleContentMode;
     lyricsFontScale: number;
     currentTime: ReturnType<typeof useMotionValue<number>>;
     currentLineIndex: number;
@@ -279,17 +257,13 @@ const ThemePreview: React.FC<{
     visualizerTunings,
     visualizerModeLabel,
     staticMode,
-    backgroundOpacity,
     visualizerOpacity,
-    visualizerBackgroundMode,
-    urlBackgroundList,
-    urlBackgroundSelectedId,
-    monetBackgroundTuning,
+    backgroundConfig,
     cappellaCustomEmojiImages,
     cappellaCustomAvatarImages,
-    monetBackgroundImage,
     monetPortraitImage,
     showSubtitleTranslation,
+    subtitleContentMode,
     lyricsFontScale,
     currentTime,
     currentLineIndex,
@@ -327,17 +301,13 @@ const ThemePreview: React.FC<{
                     visualizerTunings={visualizerTunings}
                     visualizerModeLabel={visualizerModeLabel}
                     staticMode={staticMode}
-                    backgroundOpacity={backgroundOpacity}
                     visualizerOpacity={visualizerOpacity}
-                    visualizerBackgroundMode={visualizerBackgroundMode}
-                    urlBackgroundList={urlBackgroundList}
-                    urlBackgroundSelectedId={urlBackgroundSelectedId}
-                    monetBackgroundTuning={monetBackgroundTuning}
+                    backgroundConfig={backgroundConfig}
                     cappellaCustomEmojiImages={cappellaCustomEmojiImages}
                     cappellaCustomAvatarImages={cappellaCustomAvatarImages}
-                    monetBackgroundImage={monetBackgroundImage}
                     monetPortraitImage={monetPortraitImage}
                     showSubtitleTranslation={showSubtitleTranslation}
+                    subtitleContentMode={subtitleContentMode}
                     lyricsFontScale={lyricsFontScale}
                     currentTime={currentTime}
                     currentLineIndex={currentLineIndex}
@@ -355,19 +325,16 @@ const ThemePark: React.FC<ThemeParkProps> = ({
     visualizerMode,
     visualizerTunings,
     staticMode = false,
-    backgroundOpacity = 0.75,
     visualizerOpacity = 1,
-    visualizerBackgroundMode = null,
-    urlBackgroundList = [],
-    urlBackgroundSelectedId = null,
-    monetBackgroundTuning = DEFAULT_MONET_BACKGROUND_TUNING,
+    backgroundConfig,
     cappellaCustomEmojiImages = [],
     cappellaCustomAvatarImages = [],
-    monetBackgroundImage = null,
     monetPortraitImage = null,
     showSubtitleTranslation = true,
+    subtitleContentMode,
     lyricsFontStyle,
     lyricsFontScale,
+    lyricsFontWeight,
     lyricsCustomFontFamily,
     onClose,
     onSaveTheme,
@@ -462,14 +429,16 @@ const ThemePark: React.FC<ThemeParkProps> = ({
         light: {
             ...safeDraftTheme.light,
             fontStyle: lyricsFontStyle,
+            fontWeight: lyricsFontWeight ?? undefined,
             fontFamily: lyricsCustomFontFamily ?? undefined,
         },
         dark: {
             ...safeDraftTheme.dark,
             fontStyle: lyricsFontStyle,
+            fontWeight: lyricsFontWeight ?? undefined,
             fontFamily: lyricsCustomFontFamily ?? undefined,
         },
-    }), [safeDraftTheme, lyricsCustomFontFamily, lyricsFontStyle]);
+    }), [safeDraftTheme, lyricsCustomFontFamily, lyricsFontStyle, lyricsFontWeight]);
 
     const updateColor = (mode: EditableMode, key: EditableColorKey, value: string) => {
         setDraftTheme(previous => ({
@@ -584,17 +553,13 @@ const ThemePark: React.FC<ThemeParkProps> = ({
                             visualizerTunings={visualizerTunings}
                             visualizerModeLabel={visualizerModeLabel}
                             staticMode={staticMode}
-                            backgroundOpacity={backgroundOpacity}
                             visualizerOpacity={visualizerOpacity}
-                            visualizerBackgroundMode={visualizerBackgroundMode}
-                            urlBackgroundList={urlBackgroundList}
-                            urlBackgroundSelectedId={urlBackgroundSelectedId}
-                            monetBackgroundTuning={monetBackgroundTuning}
+                            backgroundConfig={backgroundConfig}
                             cappellaCustomEmojiImages={cappellaCustomEmojiImages}
                             cappellaCustomAvatarImages={cappellaCustomAvatarImages}
-                            monetBackgroundImage={monetBackgroundImage}
                             monetPortraitImage={monetPortraitImage}
                             showSubtitleTranslation={showSubtitleTranslation}
+                            subtitleContentMode={subtitleContentMode}
                             lyricsFontScale={lyricsFontScale}
                             currentTime={currentTime}
                             currentLineIndex={currentLineIndex}

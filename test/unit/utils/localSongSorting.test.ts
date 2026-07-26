@@ -7,6 +7,9 @@ const createSong = (fileName: string, patch: Partial<LocalSong> = {}): LocalSong
     id: fileName,
     fileName,
     filePath: `Music/${fileName}`,
+    title: fileName.replace(/\.[^.]+$/, ''),
+    titleOrigin: 'import',
+    importedMetadata: { title: fileName.replace(/\.[^.]+$/, ''), titleSource: 'filename', artistNames: [] },
     duration: 0,
     fileSize: 0,
     mimeType: 'audio/mpeg',
@@ -28,6 +31,25 @@ describe('localSongSorting', () => {
             'Track 10.mp3',
         ]);
         expect(songs[0].fileName).toBe('Track 10.mp3');
+    });
+
+    it('sorts folder songs by modified date in either direction', () => {
+        const songs = [
+            createSong('older.mp3', { fileLastModified: 100 }),
+            createSong('newer.mp3', { fileLastModified: 300 }),
+            createSong('middle.mp3', { fileLastModified: 200 }),
+        ];
+
+        expect(sortLocalFolderSongs(songs, 'fileLastModified').map(song => song.fileName)).toEqual([
+            'older.mp3',
+            'middle.mp3',
+            'newer.mp3',
+        ]);
+        expect(sortLocalFolderSongs(songs, 'fileLastModified', 'desc').map(song => song.fileName)).toEqual([
+            'newer.mp3',
+            'middle.mp3',
+            'older.mp3',
+        ]);
     });
 
     it('sorts album songs by disc and track number before title', () => {

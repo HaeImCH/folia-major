@@ -1,8 +1,9 @@
 import { PlayerState, type LyricData, type PlaybackContext, type SongResult, type StagePlayerSnapshot } from '../types';
 import type { PlayerChromeVisibilityMode, RemoteControlSnapshot } from '../types/remoteControl';
 import type { VideoExportState } from '../types/videoExport';
-import { isLocalPlaybackSong, resolveNavidromePlaybackCarrier } from './appPlaybackGuards';
+import { getPlaybackSongKey, isLocalPlaybackSong, resolveNavidromePlaybackCarrier } from './appPlaybackGuards';
 import { buildStagePlayerSnapshot } from './stagePlayerSnapshot';
+import { getProviderSongMetadata } from '../services/onlineMusic/songMetadata';
 
 // src/utils/playbackSyncBridge.ts
 // Derives shared playback publisher models before adapting them to Electron-facing protocols.
@@ -94,16 +95,9 @@ const getPlaybackSyncBridgeArtist = (song: SongResult | null): string | null => 
         return null;
     }
 
-    const artistNames = song.artists?.map(artist => artist.name).filter(Boolean) ?? [];
-    const primaryArtists = artistNames.length > 0
-        ? artistNames
-        : song.ar?.map(artist => artist.name).filter(Boolean) ?? [];
+    const primaryArtists = getProviderSongMetadata(song).artists.map(artist => artist.name).filter(Boolean);
     if (primaryArtists.length > 0) {
         return primaryArtists.join(', ');
-    }
-
-    if (isLocalPlaybackSong(song)) {
-        return song.localData.matchedArtists || song.localData.artist || null;
     }
 
     const navidromeSong = resolveNavidromePlaybackCarrier(song);
@@ -115,7 +109,7 @@ const getPlaybackSyncBridgeCoverUrl = (
     coverUrl: string | null,
     cachedCoverUrl: string | null | undefined,
 ): string | null => {
-    return coverUrl || cachedCoverUrl || song?.al?.picUrl || song?.album?.picUrl || null;
+    return coverUrl || cachedCoverUrl || getProviderSongMetadata(song).coverUrl || null;
 };
 
 // Builds the single playback model used by Electron publishers with protocol-specific adapters.
@@ -148,7 +142,10 @@ export const buildPlaybackSyncBridgeModel = ({
     sampledAt = Date.now(),
 }: BuildPlaybackSyncBridgeModelArgs): PlaybackSyncBridgeModel => {
     const hasTrack = !isStageActive && Boolean(currentSong);
-    const currentIndex = currentSong ? playQueue.findIndex(song => song.id === currentSong.id) : -1;
+    const currentSongKey = currentSong ? getPlaybackSongKey(currentSong) : null;
+    const currentIndex = currentSongKey
+        ? playQueue.findIndex(song => getPlaybackSongKey(song) === currentSongKey)
+        : -1;
     const hasQueueNeighbors = playQueue.length > 1;
     const canGoPrevious = hasTrack && (currentIndex > 0 || (effectiveLoopMode === 'all' && hasQueueNeighbors));
     const canGoNext = hasTrack && (

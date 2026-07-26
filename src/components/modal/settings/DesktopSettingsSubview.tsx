@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../../../types';
+import { CustomSelect } from '../../shared/CustomSelect';
 
 // src/components/modal/settings/DesktopSettingsSubview.tsx
 // Desktop-only tray, update, and AI settings separated from the global settings modal.
@@ -27,10 +28,12 @@ type ElectronSettingsState = {
     OPENAI_API_KEY: string;
     OPENAI_API_URL: string;
     OPENAI_API_MODEL: string;
+    OPENAI_API_TEMPERATURE: string;
     AI_PROVIDER: string;
     USE_SYSTEM_PROXY_FOR_AI: boolean;
     ENABLE_UPDATE_CHECK: boolean;
     ENABLE_AUTO_UPDATE: boolean;
+    UPDATE_CHANNEL: 'realeco' | 'limo' | 'cielo' | 'internal';
     STAGE_MODE_SOURCE: string;
     DISCORD_RICH_PRESENCE_ENABLED: boolean;
 };
@@ -66,6 +69,7 @@ export type DesktopSettingsModel = {
     onDownloadUpdate: () => Promise<void> | void;
     onInstallUpdate: () => Promise<void> | void;
     onOpenChinaDownload: () => Promise<void> | void;
+    onUpdateChannelChange: (channel: 'realeco' | 'limo' | 'cielo') => Promise<void> | void;
     onSaveElectronSettings: () => Promise<void> | void;
     onToggleAutoUpdate: () => Promise<void> | void;
     onToggleUpdateCheck: () => Promise<void> | void;
@@ -115,6 +119,7 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
         onDownloadUpdate,
         onInstallUpdate,
         onOpenChinaDownload,
+        onUpdateChannelChange,
         onSaveElectronSettings,
         onToggleAutoUpdate,
         onToggleUpdateCheck,
@@ -249,7 +254,7 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                     <button
                         type="button"
                         onClick={onCheckForUpdates}
-                        disabled={!electronSettings.ENABLE_UPDATE_CHECK || updateStatus?.status === 'checking'}
+                        disabled={!electronSettings.ENABLE_UPDATE_CHECK || !updateStatus?.updateCheckSupported || updateStatus?.status === 'checking'}
                         className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium transition-all hover:bg-white/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                         style={{ color: 'var(--text-primary)' }}
                     >
@@ -273,7 +278,40 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                                 </p>
                             </div>
                         </div>
-                        {renderToggle(electronSettings.ENABLE_UPDATE_CHECK, onToggleUpdateCheck)}
+                        {renderToggle(electronSettings.ENABLE_UPDATE_CHECK, onToggleUpdateCheck, !updateStatus?.updateCheckSupported)}
+                    </div>
+
+                    <div className={`flex items-center justify-between p-4 gap-4 hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors border-b ${borderColor}`}>
+                        <div className="flex items-start gap-3 min-w-0">
+                            <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${settingsIconClass}`} style={{ color: 'var(--text-primary)' }}>
+                                <RefreshCw size={16} />
+                            </div>
+                            <div className="space-y-0.5 text-left">
+                                <h4 className="text-sm font-semibold leading-none" style={{ color: 'var(--text-primary)' }}>
+                                    {t('options.updateChannel') || 'Update Channel'}
+                                </h4>
+                                <p className="text-xs opacity-50 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                                    {t('options.updateChannelDesc') || 'Choose which release lane this desktop app follows.'}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="w-44 shrink-0">
+                            <CustomSelect
+                                value={electronSettings.UPDATE_CHANNEL}
+                                onChange={(value) => void onUpdateChannelChange(value as 'realeco' | 'limo' | 'cielo')}
+                                disabled={electronSettings.UPDATE_CHANNEL === 'internal'}
+                                isDaylight={isDaylight}
+                                theme={theme}
+                                ariaLabel={t('options.updateChannel')}
+                                options={electronSettings.UPDATE_CHANNEL === 'internal'
+                                    ? [{ value: 'internal', label: t('options.updateChannelInternal') }]
+                                    : [
+                                        { value: 'realeco', label: t('options.updateChannelRealeco') },
+                                        { value: 'limo', label: t('options.updateChannelLimo') },
+                                        { value: 'cielo', label: t('options.updateChannelCielo') },
+                                    ]}
+                            />
+                        </div>
                     </div>
 
                     <div className="flex items-center justify-between p-4 gap-4 hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors">
@@ -294,6 +332,18 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                     </div>
                 </div>
 
+                {updateStatus?.updateCheckSupportReason === 'system' && (
+                    <div className="px-1 text-xs leading-relaxed text-left text-amber-500">
+                        {t('options.updateUnsupportedSystem') || 'Automatic updates are unavailable on the current system.'}
+                    </div>
+                )}
+
+                {updateStatus?.updateCheckSupportReason === 'channel' && (
+                    <div className="px-1 text-xs leading-relaxed text-left text-amber-500">
+                        {t('options.updateUnsupportedChannel') || 'Automatic updates are unavailable for this internal build.'}
+                    </div>
+                )}
+
                 <div className="text-[10px] opacity-45 px-1 leading-relaxed text-left" style={{ color: 'var(--text-secondary)' }}>
                     {t('options.autoUpdateGithubNotice') || 'Auto update needs access to GitHub; if the network is unstable, keep a system proxy enabled.'}
                 </div>
@@ -307,11 +357,25 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                             </span>
                         </div>
 
-                        {/* 自动更新时的提示 */}
-                        {electronSettings.ENABLE_AUTO_UPDATE && updateStatus.status === 'downloading' && (
-                            <div className="text-xs text-left text-zinc-400">
-                                {t('options.autoUpdateGithubNotice')}
+                        {/* 多平台 / 手动下载时的提示 */}
+                        {updateStatus.platform === 'darwin' ? (
+                            <div className="text-xs text-left text-amber-400 font-medium opacity-90">
+                                {t('options.macManualUpdateNotice')}
                             </div>
+                        ) : updateStatus.platform === 'linux' ? (
+                            <div className="text-xs text-left text-amber-400 font-medium opacity-90">
+                                {t('options.linuxManualUpdateNotice')}
+                            </div>
+                        ) : !updateStatus.supported ? (
+                            <div className="text-xs text-left text-amber-400 font-medium opacity-90">
+                                {t('options.manualUpdateNotice')}
+                            </div>
+                        ) : (
+                            electronSettings.ENABLE_AUTO_UPDATE && updateStatus.status === 'downloading' && (
+                                <div className="text-xs text-left text-zinc-400">
+                                    {t('options.autoUpdateGithubNotice')}
+                                </div>
+                            )
                         )}
 
                         {/* 下载进度条 */}
@@ -349,15 +413,17 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                                 <ExternalLink size={14} />
                                 {t('options.openReleasePage') || 'Open Release Page'}
                             </button>
-                            <button
-                                type="button"
-                                onClick={onOpenChinaDownload}
-                                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
-                                style={{ color: 'var(--text-primary)' }}
-                            >
-                                <ExternalLink size={14} />
-                                {t('options.downloadChina')}
-                            </button>
+                            {electronSettings.UPDATE_CHANNEL === 'realeco' && updateStatus.platform !== 'linux' && (
+                                <button
+                                    type="button"
+                                    onClick={onOpenChinaDownload}
+                                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                    style={{ color: 'var(--text-primary)' }}
+                                >
+                                    <ExternalLink size={14} />
+                                    {t('options.downloadChina')}
+                                </button>
+                            )}
                             {!electronSettings.ENABLE_AUTO_UPDATE && (
                                 <button
                                     type="button"
@@ -381,6 +447,12 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                                 </button>
                             )}
                         </div>
+
+                        {updateStatus.platform !== 'linux' && (
+                            <div className="text-xs opacity-50 pt-1 text-left" style={{ color: 'var(--text-secondary)' }}>
+                                {t('options.chinaDownloadHint')}
+                            </div>
+                        )}
                     </div>
                 )}
             </section>
@@ -485,6 +557,26 @@ const DesktopSettingsSubview: React.FC<DesktopSettingsSubviewProps> = ({
                                     />
                                     <p className="text-[10px] opacity-40 leading-relaxed px-1" style={{ color: 'var(--text-secondary)' }}>
                                         {t('options.openaiApiModelDesc') || 'Required for many OpenAI-compatible providers. DeepSeek models like deepseek-v4-flash must be filled explicitly if auto-detection does not apply.'}
+                                    </p>
+                                </div>
+
+                                <div className="space-y-2 text-left">
+                                    <label className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                        {t('options.openaiApiTemperature') || 'Temperature'}
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="2"
+                                        step="0.1"
+                                        value={electronSettings.OPENAI_API_TEMPERATURE}
+                                        onChange={(e) => setElectronSettings({ ...electronSettings, OPENAI_API_TEMPERATURE: e.target.value })}
+                                        placeholder="0.7"
+                                        className="w-full px-3.5 py-2.5 bg-black/10 dark:bg-white/5 border border-white/10 rounded-xl text-sm focus:outline-none focus:border-zinc-500 dark:focus:border-white/30 focus:ring-2 focus:ring-zinc-500/10 transition-all leading-normal"
+                                        style={{ color: 'var(--text-primary)' }}
+                                    />
+                                    <p className="text-[10px] opacity-40 leading-relaxed px-1" style={{ color: 'var(--text-secondary)' }}>
+                                        {t('options.openaiApiTemperatureDesc') || 'Range: 0–2. Defaults to 0.7 when left blank.'}
                                     </p>
                                 </div>
 

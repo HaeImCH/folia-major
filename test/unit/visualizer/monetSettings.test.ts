@@ -1,12 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_MONET_BACKGROUND_TUNING, DEFAULT_MONET_TUNING, type Line, type Theme } from '@/types';
+import { DEFAULT_LATENT_BACKGROUND_TUNING, DEFAULT_MONET_BACKGROUND_TUNING, DEFAULT_MONET_TUNING, DEFAULT_NOMAND_BACKGROUND_TUNING, type Line, type Theme } from '@/types';
 import { getMonetBackgroundCacheKey, resolveWashColor, checkCanvasFilterSupport } from '@/components/visualizer/monet/monetBackgroundPipeline';
+import {
+    resolveLatentAudioSpeedTarget,
+    resolveLatentBeatSpeedTarget,
+    resolveLatentBroadbandEnergy,
+    resolveLatentOnsetPulse,
+    resolveLatentShaderColors,
+    resolveLatentShaderSpeed,
+} from '@/components/visualizer/backgrounds/latent/LatentBackground';
 import { resolveMonetWordColor } from '@/components/visualizer/monet/MonetLyricsRail';
 import { buildMonetDisplayTokens, resolveMonetLyricContext } from '@/components/visualizer/monet/VisualizerMonet';
-import { buildMonetVisibleLineEntries, measureMonetLineLayout } from '@/components/visualizer/monet/monetLyricsModel';
+import { buildMonetVisibleLineEntries, measureMonetLineLayout, resolveMonetSweepEdgeSoftness, resolveMonetSweepEnd } from '@/components/visualizer/monet/monetLyricsModel';
 import { colorWithAlpha, mixColors, parseColorChannels } from '@/components/visualizer/colorMix';
 import { buildWordColorRanges, prepareWordColorMatchers, resolveTokenColorMap } from '@/components/visualizer/wordColoring';
-import { resolveStoredMonetBackgroundTuning, resolveStoredMonetTuning, resolveVisualizerBackgroundMode } from '@/stores/useSettingsUiStore';
+import { resolveStoredLatentBackgroundTuning, resolveStoredMonetBackgroundTuning, resolveStoredMonetTuning, resolveStoredNomandBackgroundTuning, resolveVisualizerBackgroundMode } from '@/stores/useSettingsUiStore';
 
 // test/unit/visualizer/monetSettings.test.ts
 // Locks Monet tuning normalization, background cache keys, and lyric helper contracts.
@@ -110,10 +118,144 @@ describe('Monet tuning and lyric helpers', () => {
     });
 
     it('resolves automatic visualizer background mode', () => {
-        expect(resolveVisualizerBackgroundMode(null, 'monet')).toBe('monet');
-        expect(resolveVisualizerBackgroundMode(null, 'classic')).toBe('common');
+        expect(resolveVisualizerBackgroundMode(null, 'monet')).toBe('latent');
+        expect(resolveVisualizerBackgroundMode(null, 'classic')).toBe('latent');
         expect(resolveVisualizerBackgroundMode('common', 'monet')).toBe('common');
         expect(resolveVisualizerBackgroundMode('monet', 'classic')).toBe('monet');
+        expect(resolveVisualizerBackgroundMode('nomand', 'classic')).toBe('nomand');
+    });
+
+    it('normalizes persisted Nomand background tuning', () => {
+        expect(resolveStoredNomandBackgroundTuning({
+            imageSource: 'uploaded-global',
+            ditheringType: 'random',
+            size: 99,
+            colorSteps: -4,
+            originalColors: true,
+            inverted: true,
+            overlayEnabled: false,
+            overlayOpacity: 4,
+        })).toEqual({
+            imageSource: 'uploaded-global',
+            ditheringType: '8x8',
+            size: 20,
+            colorSteps: 1,
+            originalColors: true,
+            inverted: true,
+            overlayEnabled: false,
+            overlayOpacity: 1,
+        });
+
+        expect(resolveStoredNomandBackgroundTuning({
+            ditheringType: 'invalid' as never,
+            size: Number.NaN,
+        })).toEqual(DEFAULT_NOMAND_BACKGROUND_TUNING);
+    });
+
+    it('normalizes Latent background tuning and clamps shader speed settings to 0-2', () => {
+        expect(DEFAULT_LATENT_BACKGROUND_TUNING.ditheringSpeed).toBe(0.1);
+        expect(DEFAULT_LATENT_BACKGROUND_TUNING.ditheringAudioSpeed).toBe(1.2);
+        expect(DEFAULT_LATENT_BACKGROUND_TUNING.enhancedBeatResponse).toBe(true);
+        expect(DEFAULT_LATENT_BACKGROUND_TUNING.colorSource).toBe('cover-theme');
+
+        expect(resolveStoredLatentBackgroundTuning({
+            displayMode: 'mesh',
+            colorSource: 'cover-only',
+            dynamicOnlyInPlayer: false,
+            enhancedBeatResponse: false,
+            ditheringSpeed: -1,
+            ditheringAudioSpeed: 9,
+            ditheringSize: 20,
+            ditheringOpacity: -2,
+            meshSpeed: 4,
+            meshAudioSpeed: -3,
+            meshDistortion: 8,
+            meshSwirl: 4,
+            overlayEnabled: false,
+            overlayOpacity: 4,
+        })).toEqual({
+            displayMode: 'mesh',
+            colorSource: 'cover-only',
+            dynamicOnlyInPlayer: false,
+            enhancedBeatResponse: false,
+            ditheringSpeed: 0,
+            ditheringAudioSpeed: 2,
+            ditheringSize: 8,
+            ditheringOpacity: 0,
+            meshSpeed: 2,
+            meshAudioSpeed: 0,
+            meshDistortion: 2,
+            meshSwirl: 1,
+            overlayEnabled: false,
+            overlayOpacity: 1,
+        });
+
+        expect(resolveStoredLatentBackgroundTuning({
+            displayMode: 'invalid' as never,
+            meshSpeed: Number.NaN,
+        })).toEqual(DEFAULT_LATENT_BACKGROUND_TUNING);
+    });
+
+    it('keeps Latent moving slowly during playback pause without overriding explicit zero speed', () => {
+        expect(resolveLatentShaderSpeed(0.35, 1.2, 0.8, true)).toBeCloseTo(0.042);
+        expect(resolveLatentShaderSpeed(0.3, 1.4, 0.9, true)).toBeCloseTo(0.036);
+        expect(resolveLatentShaderSpeed(0, 1.4, 0.9, true)).toBe(0);
+        expect(resolveLatentShaderSpeed(0.3, 1.3, 0.5, false)).toBeCloseTo(0.8);
+    });
+
+    it('drives Latent shader speed from broadband energy instead of bass alone', () => {
+        const bassOnly = resolveLatentBroadbandEnergy(255, 0, 0, 0, 0);
+        const midOnly = resolveLatentBroadbandEnergy(0, 0, 255, 0, 0);
+        const vocalOnly = resolveLatentBroadbandEnergy(0, 0, 0, 255, 0);
+
+        expect(midOnly).toBeCloseTo(bassOnly);
+        expect(vocalOnly).toBeGreaterThan(bassOnly);
+        expect(resolveLatentBroadbandEnergy(0, 0, 0, 0, 0)).toBe(0);
+        expect(resolveLatentBroadbandEnergy(255, 255, 255, 255, 255)).toBeCloseTo(1);
+    });
+
+    it('accentuates broadband onsets in both Latent shader speeds', () => {
+        const onsetPulse = resolveLatentOnsetPulse(0.42, 0.22, 0);
+        const steadySpeed = resolveLatentBeatSpeedTarget(0.42, 0);
+        const onsetSpeed = resolveLatentBeatSpeedTarget(0.42, onsetPulse);
+
+        expect(onsetPulse).toBe(1);
+        expect(onsetSpeed).toBeGreaterThan(steadySpeed * 2);
+        expect(resolveLatentAudioSpeedTarget(0.42, onsetPulse, true)).toBe(onsetSpeed);
+        expect(resolveLatentAudioSpeedTarget(0.42, onsetPulse, false)).toBeCloseTo(0.42);
+        expect(resolveLatentOnsetPulse(0.2, 0.4, 0)).toBe(0);
+        expect(resolveLatentOnsetPulse(0.2, 0.2, 1)).toBeCloseTo(0.84);
+    });
+
+    it('keeps the readability overlay separate from Latent shader color presets', () => {
+        const theme: Theme = {
+            name: 'Latent Theme',
+            backgroundColor: '#101010',
+            primaryColor: '#f0f0f0',
+            accentColor: '#00ffff',
+            secondaryColor: '#cccccc',
+            fontStyle: 'sans',
+            animationIntensity: 'normal',
+        };
+        const coverColors = ['#110000', '#220000', '#330000', '#440000', '#550000', '#660000'];
+
+        expect(resolveLatentShaderColors(coverColors, theme, 'cover-theme')).toEqual({
+            ditheringBack: theme.backgroundColor,
+            ditheringFront: coverColors[0],
+            mesh: [
+                coverColors[0],
+                coverColors[1],
+                coverColors[2],
+                coverColors[3],
+                theme.backgroundColor,
+                theme.accentColor,
+            ],
+        });
+        expect(resolveLatentShaderColors(coverColors, theme, 'cover-only')).toEqual({
+            ditheringBack: coverColors[2],
+            ditheringFront: coverColors[0],
+            mesh: coverColors,
+        });
     });
 
     it('builds stable display tokens without dropping spaces or punctuation', () => {
@@ -243,6 +385,20 @@ describe('Monet tuning and lyric helpers', () => {
         expect(hiddenLayout.translationLineCount).toBe(0);
         expect(hiddenLayout.translationHeightPx).toBe(0);
         expect(hiddenLayout.visualHeightPx).toBe(hiddenLayout.textHeightPx);
+    });
+
+    it('clears the full Monet mask softness before a word becomes passed', () => {
+        const fullWidthPx = 120;
+        const edgeSoftnessPx = 36;
+        const sweepEndPx = resolveMonetSweepEnd(fullWidthPx, fullWidthPx, edgeSoftnessPx);
+
+        expect(sweepEndPx - edgeSoftnessPx).toBe(fullWidthPx);
+    });
+
+    it('keeps the Monet sweep feather narrow enough for short lyric tokens', () => {
+        expect(resolveMonetSweepEdgeSoftness(12)).toBe(6);
+        expect(resolveMonetSweepEdgeSoftness(32)).toBe(14.4);
+        expect(resolveMonetSweepEdgeSoftness(64)).toBe(16);
     });
 
     it('gates Monet keyword coloring through tuning', () => {

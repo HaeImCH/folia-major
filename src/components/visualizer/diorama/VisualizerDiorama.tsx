@@ -106,9 +106,12 @@ const VisualizerDiorama: React.FC<VisualizerDioramaProps> = (props) => {
         audioBands,
         showText = true,
         lyricsFontScale = 1,
+        subtitleFontScale = 1,
         subtitleOverlayOpacity,
+        subtitleOverlayBackground,
         isPlayerChromeHidden = false,
         hideTranslationSubtitle = false,
+        subtitleContentMode,
         seed,
         dioramaTuning,
     } = props;
@@ -397,7 +400,18 @@ const VisualizerDiorama: React.FC<VisualizerDioramaProps> = (props) => {
                         audioBands={audioBands}
                         motion={motionParams}
                         showLyrics={showText}
+                        geometryVisibility={dioramaTuning?.geometryVisibility ?? DEFAULT_DIORAMA_TUNING.geometryVisibility}
+                        particleDensity={dioramaTuning?.particleDensity ?? DEFAULT_DIORAMA_TUNING.particleDensity}
+                        particleScale={dioramaTuning?.particleScale ?? DEFAULT_DIORAMA_TUNING.particleScale}
+                        particleGlowEnabled={dioramaTuning?.particleGlowEnabled ?? DEFAULT_DIORAMA_TUNING.particleGlowEnabled}
+                        particleGlowIntensity={dioramaTuning?.particleGlowIntensity ?? DEFAULT_DIORAMA_TUNING.particleGlowIntensity}
                         showParticles={dioramaTuning?.showParticles ?? true}
+                        backgroundParticleCircumference={
+                            dioramaTuning?.backgroundParticleCircumference ?? DEFAULT_DIORAMA_TUNING.backgroundParticleCircumference
+                        }
+                        backgroundParticleRadial={
+                            dioramaTuning?.backgroundParticleRadial ?? DEFAULT_DIORAMA_TUNING.backgroundParticleRadial
+                        }
                         lyricsFontScale={lyricsFontScale}
                         // Each follow-sing effect resolves to an EFFECTIVE strength here (0 when its
                         // toggle is off) - the scene renders the three effects on fully separate paths.
@@ -405,8 +419,12 @@ const VisualizerDiorama: React.FC<VisualizerDioramaProps> = (props) => {
                             ? (dioramaTuning?.glowIntensity ?? DEFAULT_DIORAMA_TUNING.glowIntensity) : 0}
                         soulIntensity={(dioramaTuning?.soulEnabled ?? DEFAULT_DIORAMA_TUNING.soulEnabled)
                             ? (dioramaTuning?.soulIntensity ?? DEFAULT_DIORAMA_TUNING.soulIntensity) : 0}
+                        soulActiveEnabled={(dioramaTuning?.soulEnabled ?? DEFAULT_DIORAMA_TUNING.soulEnabled)
+                            && (dioramaTuning?.soulActiveEnabled ?? DEFAULT_DIORAMA_TUNING.soulActiveEnabled)}
                         gradientIntensity={(dioramaTuning?.gradientEnabled ?? DEFAULT_DIORAMA_TUNING.gradientEnabled)
                             ? (dioramaTuning?.gradientIntensity ?? DEFAULT_DIORAMA_TUNING.gradientIntensity) : 0}
+                        keywordColoringEnabled={dioramaTuning?.keywordColoringEnabled
+                            ?? DEFAULT_DIORAMA_TUNING.keywordColoringEnabled}
                     />
                 </Canvas>
             </div>
@@ -438,8 +456,11 @@ const VisualizerDiorama: React.FC<VisualizerDioramaProps> = (props) => {
                 translationFontSize={translationFontSize}
                 upcomingFontSize={upcomingFontSize}
                 subtitleOverlayOpacity={subtitleOverlayOpacity}
+                subtitleOverlayBackground={subtitleOverlayBackground}
+                subtitleFontScale={subtitleFontScale}
                 isPlayerChromeHidden={isPlayerChromeHidden}
                 hideTranslationSubtitle={hideTranslationSubtitle}
+                subtitleContentMode={subtitleContentMode}
             />
         </VisualizerShell>
     );

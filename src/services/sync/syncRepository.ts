@@ -13,6 +13,7 @@ import {
     putRemoteThemes,
 } from './syncClient';
 import { createSongSyncFingerprint, createSongSyncFingerprintCandidates } from './syncFingerprint';
+import { getPlaybackSongKey } from '../../utils/appPlaybackGuards';
 import { buildThemeBucketSummaries, getThemeBucketId } from './syncMerkle';
 import {
     createLegacyNeteaseThemeSyncRecord,
@@ -62,9 +63,12 @@ const getConfiguredSync = () => {
     return isSyncConfigured(config) ? config : null;
 };
 
-const isRemoteNewer = (remoteUpdatedAt: string | null | undefined, localUpdatedAt: string | null | undefined) => (
-    Boolean(remoteUpdatedAt) && (!localUpdatedAt || Date.parse(remoteUpdatedAt) > Date.parse(localUpdatedAt))
-);
+const isRemoteNewer = (remoteUpdatedAt: string | null | undefined, localUpdatedAt: string | null | undefined) => {
+    if (!remoteUpdatedAt) {
+        return false;
+    }
+    return !localUpdatedAt || Date.parse(remoteUpdatedAt) > Date.parse(localUpdatedAt);
+};
 
 const readThemeSyncWatermark = (): ThemeSyncWatermark | null => {
     if (!isBrowser()) {
@@ -133,7 +137,7 @@ const isThemeWatermarkFresh = (
     remoteState: SyncRemoteState,
     localRegistrySignature: string,
 ) => (
-    Boolean(watermark)
+    watermark !== null
     && watermark.remoteThemesUpdatedAt === remoteState.themesUpdatedAt
     && watermark.remoteThemeCount === remoteState.themeCount
     && watermark.localRegistrySignature === localRegistrySignature
@@ -226,7 +230,7 @@ export const getSyncedThemeForSong = async (song: SongResult | null): Promise<Du
 
     const theme = sanitizeDualTheme(matched.theme);
     if (song?.id != null) {
-        await saveToCache(`dual_theme_${song.id}`, theme);
+        await saveToCache(`dual_theme_${getPlaybackSongKey(song)}`, theme);
     }
     await saveRemoteThemeToLocalCache(matched);
     return theme;
@@ -431,7 +435,7 @@ export const pushMissingLocalThemesToRemote = async (
         const nextLocalBuckets = buildThemeBucketSummaries(nextLocalRecords);
         const bucketsAreNowEqual = diffBucketIds.every((bucketId) => {
             const remoteBucket = remoteBuckets.get(bucketId);
-            return Boolean(remoteBucket) && areThemeBucketsEqual(nextLocalBuckets[bucketId], remoteBucket);
+            return remoteBucket !== undefined && areThemeBucketsEqual(nextLocalBuckets[bucketId], remoteBucket);
         });
         if (bucketsAreNowEqual) {
             writeThemeSyncWatermark({

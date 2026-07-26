@@ -1,4 +1,5 @@
 import type { LineRenderHints } from './utils/lyrics/renderHints';
+import type { MediaId, PlaybackSourceRef, ProviderCatalogRef } from './types/onlineMusic';
 
 export interface LyricRuby {
   text: string;
@@ -35,10 +36,13 @@ export interface LyricBackgroundVocal {
   startTime: number; // Seconds
   endTime: number; // Seconds
   words: Word[];
+  agentId?: string;
   translation?: string;
   romanization?: string;
   alternateTexts?: LyricAlternateText[];
 }
+
+export type SubtitleContentMode = 'translation' | 'romanization' | 'none';
 
 export interface LyricAgent {
   id: string;
@@ -59,6 +63,7 @@ export interface Line {
   romanization?: string;
   alternateTexts?: LyricAlternateText[];
   backgroundVocal?: LyricBackgroundVocal;
+  backgroundVocals?: LyricBackgroundVocal[];
   renderHints?: LineRenderHints;
   isChorus?: boolean;
   chorusEffect?: 'bars' | 'circles' | 'beams';
@@ -84,6 +89,7 @@ export interface Theme {
   fontStyle: 'sans' | 'serif' | 'mono';
   fontFamily?: string;
   fontFamilyStack?: string[];
+  fontWeight?: number;
   animationIntensity: 'calm' | 'normal' | 'chaotic';
   wordColors?: { word: string; color: string; }[];
   lyricsIcons?: string[];
@@ -114,7 +120,7 @@ export type VisualizerFrameRate = 'off' | 120 | 90 | 60;
 export type HomeViewTab = 'playlist' | 'local' | 'albums' | 'navidrome' | 'radio';
 
 export type PlaybackContext = 'main' | 'stage';
-export type StageSource = 'stage-api' | 'now-playing' | 'spotify';
+export type StageSource = 'stage-api' | 'now-playing' | 'playercap' | 'spotify';
 export type StageLoopMode = 'off' | 'all' | 'one';
 export type QueueAddBehavior = 'append' | 'next';
 export type StageActiveEntryKind = 'lyrics' | 'media';
@@ -487,44 +493,161 @@ export const DEFAULT_TILT_TUNING: TiltTuning = {
   colorScheme: 'default',
 };
 
+export interface PendoloTuning {
+  arcRadius: number;
+  arcAngleDeg: number;
+  wheelCenterX: number;
+  wheelCenterY: number;
+  tickSnappiness: number;
+  activeScale: number;
+  showGearDecor: 'none' | 'subtle' | 'full';
+  showCenterGradient?: boolean;
+  showCoverOnWatchFace?: boolean;
+  enableLineGlow?: boolean;
+}
+
+export const DEFAULT_PENDOLO_TUNING: PendoloTuning = {
+  arcRadius: 0.42,
+  arcAngleDeg: 100,
+  wheelCenterX: 0.0,
+  wheelCenterY: 0.50,
+  tickSnappiness: 2.0,
+  activeScale: 1.25,
+  showGearDecor: 'subtle',
+  showCenterGradient: true,
+  showCoverOnWatchFace: false,
+  enableLineGlow: false,
+};
+
 // Diorama's camera STYLE (calm/standard/chaotic) is not part of its tuning: like every other
 // visualizer it follows theme.animationIntensity (the player-panel intensity chip / AI themes), so
 // the theme system stays the single source of truth. The tuning only carries diorama-specific knobs.
+/** The two mutually-exclusive shapes the point-cloud layer can take. */
+export type DioramaGeometryMode = 'clouds' | 'corridor';
+
+export interface DioramaGeometryVisibility {
+  /** Parent switch: hides the whole point-cloud layer without discarding child preferences. */
+  enabled: boolean;
+  /**
+   * 'clouds' = per-lyric point-cloud formations (the family switches below apply).
+   * 'corridor' = one always-on point tunnel threaded along the flight path (families ignored).
+   * The two never render together - picking one replaces the other.
+   */
+  mode: DioramaGeometryMode;
+  /** Point-cloud cubes used by architectural formations. */
+  strands: boolean;
+  /** Open cylindrical point-cloud shells. */
+  blobs: boolean;
+  /** Triangular tetrahedron point-cloud crystals. */
+  ribbons: boolean;
+  /** Circular point-cloud loops. */
+  rings: boolean;
+}
+
+export const DEFAULT_DIORAMA_GEOMETRY_VISIBILITY: DioramaGeometryVisibility = {
+  enabled: true,
+  mode: 'clouds',
+  strands: true,
+  blobs: true,
+  ribbons: true,
+  rings: true,
+};
+
+export const DIORAMA_PARTICLE_DENSITY_MIN = 96;
+export const DIORAMA_PARTICLE_DENSITY_MAX = 1536;
+export const DIORAMA_PARTICLE_DENSITY_STEP = 24;
+// Background dust motes PER LINE of the resident window (see dioramaMoteField.ts). The motes sit in a
+// shell around the flight axis, and the two axes are INDEPENDENT: 圆周 = motes around each ring, 径向 =
+// how many layers across the shell's thickness (inner→outer). Motes-per-line = 圆周 x 径向; the window
+// holds 8 lines, so MAX x MAX bounds the layer at 8*48*4 = 1536 points for low-end GPUs / OBS sources
+// however far the sliders are dragged. Default 28 x 2 = 56 matches the old single-slider default.
+export const DIORAMA_MOTE_CIRCUMFERENCE_MIN = 4;
+export const DIORAMA_MOTE_CIRCUMFERENCE_MAX = 48;
+export const DIORAMA_MOTE_CIRCUMFERENCE_STEP = 2;
+export const DIORAMA_MOTE_RADIAL_MIN = 1;
+export const DIORAMA_MOTE_RADIAL_MAX = 4;
+export const DIORAMA_MOTE_RADIAL_STEP = 1;
+export const DIORAMA_PARTICLE_SCALE_MIN = 0.65;
+export const DIORAMA_PARTICLE_SCALE_MAX = 1.6;
+export const DIORAMA_PARTICLE_SCALE_STEP = 0.05;
+// Compatibility aliases for the uncommitted tuning UI while it migrates from point size to cluster scale.
+export const DIORAMA_PARTICLE_SIZE_MIN = DIORAMA_PARTICLE_SCALE_MIN;
+export const DIORAMA_PARTICLE_SIZE_MAX = DIORAMA_PARTICLE_SCALE_MAX;
+export const DIORAMA_PARTICLE_SIZE_STEP = DIORAMA_PARTICLE_SCALE_STEP;
+export const DIORAMA_PARTICLE_GLOW_INTENSITY_MIN = 0.1;
+export const DIORAMA_PARTICLE_GLOW_INTENSITY_MAX = 1.5;
+export const DIORAMA_PARTICLE_GLOW_INTENSITY_STEP = 0.05;
+
 export interface DioramaTuning {
   cameraSpeed: number;
   motionAmount: number;
   audioReactivity: number;
+  geometryVisibility: DioramaGeometryVisibility;
+  /** Number of points requested for each formation anchor; the renderer also enforces a global cap. */
+  particleDensity: number;
+  /** Spatial scale multiplier for each complete point-cloud formation. */
+  particleScale: number;
+  /** One soft gradient aura per point-cloud cluster, separate from lyric sung-glow. */
+  particleGlowEnabled: boolean;
+  particleGlowIntensity: number;
   showParticles: boolean;
+  /** Background dust shell, two INDEPENDENT axes (motes-per-line = the product; field clamps to its cap):
+   *  背景粒子·圆周密度 = motes around each ring, 背景粒子·径向密度 = layers across the shell thickness. */
+  backgroundParticleCircumference: number;
+  backgroundParticleRadial: number;
   /** 普通辉光跟唱: soft glow on the unit being sung. Independent toggle + strength. */
   glowEnabled: boolean;
   glowIntensity: number;
   /** 灵魂出窍跟唱: a ghost copy of the sung glyph drifts out of the text. Independent toggle + strength. */
   soulEnabled: boolean;
   soulIntensity: number;
+  /** 当前字漂移: a plain ON/OFF sub-switch of 灵魂出窍. ON lets the glyph CURRENTLY being sung drift at the
+   *  same 灵魂出窍强度 as every other glyph; OFF holds it perfectly registered (no doubling / reading
+   *  obstruction) until it finishes, after which it detaches and flies like the rest. No strength of its
+   *  own - it borrows soulIntensity. Only has a visible effect when soulEnabled. */
+  soulActiveEnabled: boolean;
   /** 渐变跟唱: the line's fill progressively deepens with the sung progress. Independent toggle + strength. */
   gradientEnabled: boolean;
   gradientIntensity: number;
+  /** 关键字着色: the theme's `wordColors` keywords (written by the AI theme from the song's lyrics) become
+   *  the follow-sing TARGET colour of the units they cover - hidden until the singing reaches them, never
+   *  a resting colour. Same source and matcher as every other visualizer. */
+  keywordColoringEnabled: boolean;
 }
 
 export const DEFAULT_DIORAMA_TUNING: DioramaTuning = {
   cameraSpeed: 1,
   motionAmount: 1,
   audioReactivity: 1,
+  geometryVisibility: DEFAULT_DIORAMA_GEOMETRY_VISIBILITY,
+  particleDensity: 576,
+  particleScale: 1,
+  particleGlowEnabled: true,
+  particleGlowIntensity: 0.65,
   showParticles: true,
+  backgroundParticleCircumference: 28,
+  backgroundParticleRadial: 2,
   glowEnabled: true,
   glowIntensity: 1,
   soulEnabled: true,
   soulIntensity: 1,
+  soulActiveEnabled: false,
   gradientEnabled: false,
   gradientIntensity: 1,
+  keywordColoringEnabled: true,
 };
 
 export type MonetBackgroundSource = 'cover-derived' | 'uploaded-global';
 export type MonetBackgroundLayout = 'full-overlay' | 'half-pane-gradient';
 export type MonetBackgroundWashColorMode = 'theme' | 'custom';
+export type NomandBackgroundSource = 'cover-derived' | 'uploaded-global';
+export type NomandBackgroundDitheringType = '2x2' | '4x4' | '8x8';
+export type LatentBackgroundDisplayMode = 'dithering' | 'mesh' | 'both';
+export type LatentBackgroundColorSource = 'cover-theme' | 'cover-only';
 export type MonetAudioStyle = 'bar' | 'line';
 export type MonetPortraitSource = 'cover' | 'custom';
-export type VisualizerBackgroundMode = 'common' | 'monet' | 'url' | 'sora';
+export type BuiltinVisualizerBackgroundMode = 'common' | 'monet' | 'nomand' | 'latent' | 'url' | 'sora';
+export type VisualizerBackgroundMode = BuiltinVisualizerBackgroundMode | (string & {});
 
 export interface UrlBackgroundItem {
   id: string;
@@ -543,6 +666,34 @@ export interface MonetBackgroundTuning {
   backgroundHalfPaneOffsetX: number;
   backgroundWashColorMode: MonetBackgroundWashColorMode;
   backgroundWashCustomColor: string;
+}
+
+export interface NomandBackgroundTuning {
+  imageSource: NomandBackgroundSource;
+  ditheringType: NomandBackgroundDitheringType;
+  size: number;
+  colorSteps: number;
+  originalColors: boolean;
+  inverted: boolean;
+  overlayEnabled: boolean;
+  overlayOpacity: number;
+}
+
+export interface LatentBackgroundTuning {
+  displayMode: LatentBackgroundDisplayMode;
+  colorSource: LatentBackgroundColorSource;
+  dynamicOnlyInPlayer: boolean;
+  enhancedBeatResponse: boolean;
+  ditheringSpeed: number;
+  ditheringAudioSpeed: number;
+  ditheringSize: number;
+  ditheringOpacity: number;
+  meshSpeed: number;
+  meshAudioSpeed: number;
+  meshDistortion: number;
+  meshSwirl: number;
+  overlayEnabled: boolean;
+  overlayOpacity: number;
 }
 
 export interface MonetTuning {
@@ -567,6 +718,34 @@ export const DEFAULT_MONET_BACKGROUND_TUNING: MonetBackgroundTuning = {
   backgroundHalfPaneOffsetX: 0,
   backgroundWashColorMode: 'theme',
   backgroundWashCustomColor: '#8fb7ff',
+};
+
+export const DEFAULT_NOMAND_BACKGROUND_TUNING: NomandBackgroundTuning = {
+  imageSource: 'cover-derived',
+  ditheringType: '8x8',
+  size: 3,
+  colorSteps: 4,
+  originalColors: false,
+  inverted: false,
+  overlayEnabled: true,
+  overlayOpacity: 0.35,
+};
+
+export const DEFAULT_LATENT_BACKGROUND_TUNING: LatentBackgroundTuning = {
+  displayMode: 'both',
+  colorSource: 'cover-theme',
+  dynamicOnlyInPlayer: true,
+  enhancedBeatResponse: true,
+  ditheringSpeed: 0.1,
+  ditheringAudioSpeed: 1.2,
+  ditheringSize: 2.5,
+  ditheringOpacity: 0.55,
+  meshSpeed: 0.3,
+  meshAudioSpeed: 2,
+  meshDistortion: 0.8,
+  meshSwirl: 0.1,
+  overlayEnabled: true,
+  overlayOpacity: 0.35,
 };
 
 export const DEFAULT_MONET_TUNING: MonetTuning = {
@@ -674,14 +853,18 @@ export interface NeteasePlaylist {
 }
 
 export interface Artist {
-  id: number;
+  id: MediaId;
   name: string;
+  entityId?: string;
+  catalogRef?: ProviderCatalogRef;
 }
 
 export interface Album {
-  id: number;
+  id: MediaId;
   name: string;
-  picUrl?: string;
+  coverUrl?: string;
+  entityId?: string;
+  catalogRef?: ProviderCatalogRef;
 }
 
 export interface SongPrivilege {
@@ -707,24 +890,17 @@ export type LyricProviderSource = 'netease' | 'qq' | 'kugou' | 'amll';
 export type AmllDbPlatform = 'ncm' | 'qq';
 
 export interface SongResult {
-  id: number;
+  id: MediaId;
   name: string;
   artists: Artist[];
   album: Album;
-  duration: number; // milliseconds usually from API
+  durationMs: number;
   isPureMusic?: boolean;
+  aliases?: string[];
+  translatedNames?: string[];
   t?: 0 | 1 | 2;
   sourceType?: 'netease' | 'cloud';
-  // Netease API raw fields
-  al?: {
-    id: number;
-    name: string;
-    picUrl?: string;
-  };
-  ar?: Artist[];
-  dt?: number; // duration in ms
-  alia?: string[]; // 别名
-  tns?: string[]; // 翻译名
+  sourceRef?: PlaybackSourceRef;
   fee?: number;
   noCopyrightRcmd?: NoCopyrightRecommendation | null;
   resourceState?: boolean;
@@ -743,7 +919,7 @@ export interface OnlineLyricsState {
   importedLyricsName?: string | null;
   hasOnlineOverride?: boolean;
   onlineOverrideLyrics?: LyricData | null;
-  matchedSongId?: number;
+  matchedSongId?: MediaId;
   matchedIsPureMusic?: boolean;
   matchedLyricsSource?: LyricProviderSource;
   matchedLyricsProviderPlatform?: AmllDbPlatform;
@@ -772,18 +948,15 @@ export interface LocalSong {
   bitrate?: number; // bps
   addedAt: number; // timestamp
 
-  // Extracted metadata from file tags
-  title?: string;
-  artist?: string;
-  album?: string;
+  // Canonical metadata and retained source snapshots
+  title: string;
+  titleOrigin: import('./types/localLibrary').LocalSongTitleOrigin;
+  importedMetadata: import('./types/localLibrary').LocalSongImportedMetadata;
+  onlineMetadata?: import('./types/localLibrary').LocalSongOnlineMetadata;
   trackNumber?: number;
   discNumber?: number;
   embeddedMetadataVersion?: number;
 
-  // Embedded metadata from file tags
-  embeddedTitle?: string;
-  embeddedArtist?: string;
-  embeddedAlbum?: string;
   embeddedCover?: Blob; // Preferred local cover blob (folder cover or embedded art), stored in IndexedDB
   replayGain?: number; // ReplayGain track gain in dB
   replayGainTrackGain?: number; // ReplayGain track gain in dB
@@ -792,13 +965,9 @@ export interface LocalSong {
   replayGainAlbumPeak?: number; // ReplayGain album peak ratio
 
   // Lyrics matching result
-  matchedSongId?: number; // Netease song ID
-  matchedArtists?: string; // Matched artist names (joined string)
-  matchedAlbumId?: number; // Netease album ID
-  matchedAlbumName?: string; // Netease album name
   matchedLyrics?: LyricData;
   matchedIsPureMusic?: boolean;
-  matchedCoverUrl?: string; // Cover image URL from matched song
+  matchedLyricsSongId?: number | string; // Provider-scoped ID used for the saved lyric result
   hasManualLyricSelection?: boolean;
   folderName?: string; // Name of the folder if imported via folder import
   noAutoMatch?: boolean; // If true, do not attempt to auto-match metadata
@@ -808,7 +977,6 @@ export interface LocalSong {
   // User preferences for online data override (set via LyricMatchModal)
   lyricsSource?: 'local' | 'embedded' | 'online';  // Explicit lyrics source selection; undefined = default priority (local > embedded > online)
   useOnlineCover?: boolean;     // Prefer online cover over embedded cover
-  useOnlineMetadata?: boolean;  // Prefer online artist/album over embedded tags
 
   // Local Lyrics (.lrc / .vtt / .ttml / .qrc / .yrc / .krc files)
   hasLocalLyrics?: boolean;
@@ -868,13 +1036,27 @@ export interface LocalLibraryGroup {
   trackCount?: number;
   description?: string;
   albumId?: number;
+  entityId?: string;
   playlistId?: string;
 }
 
+export type {
+  LocalLibraryAssignment,
+  LocalLibraryAssignmentOrigin,
+  LocalLibraryEntity,
+  LocalLibraryEntityKind,
+  LocalSongImportedMetadata,
+  LocalSongMetadataSource,
+  LocalSongOnlineMetadata,
+  LocalSongReference,
+  LocalSongTitleOrigin,
+} from './types/localLibrary';
+
 // Extend SongResult to support local files and Navidrome files
 export interface UnifiedSong extends SongResult {
+  sourceRef: PlaybackSourceRef;
   isLocal?: boolean;
-  localData?: LocalSong;
+  localRef?: import('./types/localLibrary').LocalSongReference;
   isNavidrome?: boolean;
   navidromeData?: any;
 }
@@ -890,5 +1072,5 @@ export interface AudioBands {
     mid: MotionValue<number>;     // 400-1200Hz (Triangles)
     vocal: MotionValue<number>;   // 1000-3500Hz (Icons)
     treble: MotionValue<number>;  // 3500Hz+ (Crosses)
-    spectrum?: MotionValue<Uint8Array>; // Raw analyser FFT magnitude bins for full-spectrum visualizers
+    spectrum?: MotionValue<Uint8Array<ArrayBuffer>>; // Raw analyser FFT magnitude bins for full-spectrum visualizers
   }

@@ -69,11 +69,26 @@ export const toSafeRemoteUrl = (url: string | null | undefined): string | null |
         return url;
     }
 
-    if (url.startsWith('http:') && url.includes('music.126.net')) {
-        return url.replace('http:', 'https:');
+    const normalizedUrl = url.split(/,\s*(?=https?:\/\/)/i)[0]?.trim() || url;
+
+    if (normalizedUrl.startsWith('http:') && normalizedUrl.includes('music.126.net')) {
+        return normalizedUrl.replace('http:', 'https:');
     }
 
-    return url;
+    try {
+        const parsedUrl = new URL(normalizedUrl);
+        if (
+            parsedUrl.protocol === 'http:' &&
+            parsedUrl.hostname.startsWith('fs.') &&
+            parsedUrl.hostname.endsWith('.kugou.com')
+        ) {
+            return normalizedUrl.replace(/^http:/, 'https:');
+        }
+    } catch {
+        return normalizedUrl;
+    }
+
+    return normalizedUrl;
 };
 
 export const resolveDebugSongSource = (song: SongResult | null): 'none' | 'local' | 'navidrome' | 'online' => {
@@ -101,20 +116,7 @@ export const resolveDebugLyricsSource = (
     }
 
     if (isLocalPlaybackSong(song)) {
-        const localData = song.localData;
-        if (localData.lyricsSource) {
-            return localData.lyricsSource;
-        }
-        if (localData.hasLocalLyrics && localData.localLyricsContent) {
-            return 'local';
-        }
-        if (localData.hasEmbeddedLyrics && localData.embeddedLyricsContent) {
-            return 'embedded';
-        }
-        if (localData.matchedLyrics) {
-            return 'online';
-        }
-        return 'none';
+        return lyrics ? 'online' : 'none';
     }
 
     if (isNavidromePlaybackSong(song)) {
@@ -125,7 +127,10 @@ export const resolveDebugLyricsSource = (
         if (navidromeSong.matchedLyrics) {
             return 'online';
         }
-        if (lyrics || navidromeSong.cachedStructuredLyrics?.length || navidromeSong.cachedPlainLyrics?.trim()) {
+        const hasStructuredLyrics = Array.isArray(navidromeSong.cachedStructuredLyrics)
+            ? navidromeSong.cachedStructuredLyrics.length > 0
+            : Boolean(navidromeSong.cachedStructuredLyrics?.line.length || navidromeSong.cachedStructuredLyrics?.cueLine?.length);
+        if (lyrics || hasStructuredLyrics || navidromeSong.cachedPlainLyrics?.trim()) {
             return 'navi';
         }
         return 'none';
@@ -141,12 +146,14 @@ export const resolveDebugLyricsSource = (
 type NavidromeSongLike = SongResult & {
     lyricsSource?: 'navi' | 'online';
     matchedLyrics?: LyricData;
-    cachedStructuredLyrics?: StructuredLyric['line'];
+    cachedStructuredLyrics?: StructuredLyric | StructuredLyric[] | StructuredLyric['line'];
     cachedPlainLyrics?: string;
 };
 
 export const hasEnhancedStructuredLines = (item: StructuredLyric): boolean => {
-    return item.line?.some(line => detectTimedLyricFormat(line.value) === 'enhanced-lrc') ?? false;
+    return item.cueLine?.some(cueLine => cueLine.cue?.some(cue => typeof cue.start === 'number'))
+        || item.line?.some(line => detectTimedLyricFormat(line.value) === 'enhanced-lrc')
+        || false;
 };
 
 export const toDebugLineSnapshot = (line: LyricData['lines'][number] | null) => {

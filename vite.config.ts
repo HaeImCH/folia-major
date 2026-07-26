@@ -33,7 +33,9 @@ const LYRIC_PROXY_IGNORED_FORWARD_HEADERS = ['host', 'connection', 'content-leng
 
 function isAllowedLyricProxyHost(hostname: string): boolean {
   return hostname === 'qq.com' || hostname.endsWith('.qq.com') ||
+    hostname === 'y.gtimg.cn' ||
     hostname === 'kugou.com' || hostname.endsWith('.kugou.com') ||
+    hostname === 'kgimg.com' || hostname.endsWith('.kgimg.com') ||
     hostname === 'amll-ttml-db.stevexmh.net';
 }
 
@@ -54,11 +56,11 @@ function sendLyricProxyJson(res: import('http').ServerResponse, statusCode: numb
   res.end(JSON.stringify(body));
 }
 
-function readDevRequestBody(req: import('http').IncomingMessage): Promise<Buffer> {
+function readDevRequestBody(req: import('http').IncomingMessage): Promise<Uint8Array<ArrayBuffer>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('end', () => resolve(new Uint8Array(Buffer.concat(chunks))));
     req.on('error', reject);
   });
 }
@@ -182,7 +184,8 @@ export default async function viteConfig({ mode }: ConfigEnv): Promise<UserConfi
     }
   }
 
-  const appVersionLabel = process.env.APP_VERSION_LABEL?.trim() || 'folia-major';
+  const appVersionLabel = process.env.APP_VERSION_LABEL?.trim() || 'Realeco';
+  const appReleaseChannel = process.env.APP_RELEASE_CHANNEL?.trim().toLowerCase() || 'realeco';
 
   return {
     base: process.env.ELECTRON === 'true' ? './' : '/',
@@ -199,8 +202,8 @@ export default async function viteConfig({ mode }: ConfigEnv): Promise<UserConfi
           // three.js is a large dependency used only by the diorama 3D visualizer. Split it into its
           // own chunk so it doesn't bloat the main bundle past the PWA precache size limit (each file
           // must stay under workbox.maximumFileSizeToCacheInBytes to be cached for offline use).
-          manualChunks: {
-            three: ['three'],
+          manualChunks(id) {
+            return id.includes('/node_modules/three/') ? 'three' : undefined;
           },
         },
       },
@@ -245,7 +248,8 @@ export default async function viteConfig({ mode }: ConfigEnv): Promise<UserConfi
       '__COMMIT_HASH__': JSON.stringify(commitHash + commitSuffix),
       '__GIT_BRANCH__': JSON.stringify(gitBranch),
       '__APP_VERSION__': JSON.stringify(JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')).version),
-      '__APP_VERSION_LABEL__': JSON.stringify(appVersionLabel)
+      '__APP_VERSION_LABEL__': JSON.stringify(appVersionLabel),
+      '__APP_RELEASE_CHANNEL__': JSON.stringify(appReleaseChannel)
     },
     resolve: {
       alias: {

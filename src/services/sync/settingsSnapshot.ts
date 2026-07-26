@@ -14,11 +14,15 @@ export const buildSyncedVisualSettings = (state: SettingsUiState): SyncedVisualS
     visualizerOpacity: state.visualizerOpacity,
     hidePlayerTranslationSubtitle: state.hidePlayerTranslationSubtitle,
     showSubtitleTranslation: state.showSubtitleTranslation,
+    subtitleContentMode: state.subtitleContentMode,
+    subtitleOverlayBackground: state.subtitleOverlayBackground,
     lyricsFontStyle: state.lyricsFontStyle,
     lyricsFontScale: state.lyricsFontScale,
+    lyricsFontWeight: state.lyricsFontWeight,
     lyricsFontFallbackFamilies: state.lyricsFontFallbackFamilies,
     subtitleFontInheritsLyrics: state.subtitleFontInheritsLyrics,
     subtitleFontStyle: state.subtitleFontStyle,
+    subtitleFontWeight: state.subtitleFontWeight,
     subtitleFontFamily: state.subtitleFontFamily,
     subtitleFontFallbackFamilies: state.subtitleFontFallbackFamilies,
     visualizerTunings: collectVisualizerTunings(state as unknown as Record<string, unknown>),
@@ -31,7 +35,10 @@ export const buildSyncedVisualSettings = (state: SettingsUiState): SyncedVisualS
     tiltTuning: state.tiltTuning,
     dioramaTuning: state.dioramaTuning,
     monetBackgroundTuning: state.monetBackgroundTuning,
+    nomandBackgroundTuning: state.nomandBackgroundTuning,
+    latentBackgroundTuning: state.latentBackgroundTuning,
     monetTuning: state.monetTuning,
+    pendoloTuning: state.pendoloTuning,
     urlBackgroundList: state.urlBackgroundList,
     urlBackgroundSelectedId: state.urlBackgroundSelectedId,
     homeLayoutStyle: state.homeLayoutStyle,
@@ -66,11 +73,15 @@ export const applySyncedVisualSettings = (
     if (settings.visualizerOpacity !== undefined) state.handleSetVisualizerOpacity(settings.visualizerOpacity);
     if (settings.hidePlayerTranslationSubtitle !== undefined) state.handleToggleHidePlayerTranslationSubtitle(Boolean(settings.hidePlayerTranslationSubtitle));
     if (settings.showSubtitleTranslation !== undefined) state.handleToggleShowSubtitleTranslation(Boolean(settings.showSubtitleTranslation));
+    if (settings.subtitleContentMode !== undefined) state.handleSetSubtitleContentMode(settings.subtitleContentMode);
+    if (settings.subtitleOverlayBackground !== undefined) state.handleToggleSubtitleOverlayBackground(Boolean(settings.subtitleOverlayBackground));
     if (settings.lyricsFontStyle !== undefined) state.handleSetLyricsFontStyle(settings.lyricsFontStyle);
     if (settings.lyricsFontScale !== undefined) state.handleSetLyricsFontScale(settings.lyricsFontScale);
+    if (settings.lyricsFontWeight !== undefined) state.handleSetLyricsFontWeight(settings.lyricsFontWeight);
     if (settings.lyricsFontFallbackFamilies !== undefined) state.handleSetLyricsFontFallbackFamilies(settings.lyricsFontFallbackFamilies);
     if (settings.subtitleFontInheritsLyrics !== undefined) state.handleSetSubtitleFontInheritsLyrics(Boolean(settings.subtitleFontInheritsLyrics));
     if (settings.subtitleFontStyle !== undefined) state.handleSetSubtitleFontStyle(settings.subtitleFontStyle);
+    if (settings.subtitleFontWeight !== undefined) state.handleSetSubtitleFontWeight(settings.subtitleFontWeight);
     if (settings.subtitleFontFamily !== undefined) state.handleSetSubtitleFontFamily(settings.subtitleFontFamily);
     if (settings.subtitleFontFallbackFamilies !== undefined) state.handleSetSubtitleFontFallbackFamilies(settings.subtitleFontFallbackFamilies);
     if (settings.visualizerTunings !== undefined) {
@@ -85,7 +96,10 @@ export const applySyncedVisualSettings = (
     if (settings.visualizerTunings === undefined && settings.tiltTuning !== undefined) state.handleSetTiltTuning(settings.tiltTuning as Parameters<SettingsUiState['handleSetTiltTuning']>[0]);
     if (settings.visualizerTunings === undefined && settings.dioramaTuning !== undefined) state.handleSetDioramaTuning(settings.dioramaTuning as Parameters<SettingsUiState['handleSetDioramaTuning']>[0]);
     if (settings.monetBackgroundTuning !== undefined) state.handleSetMonetBackgroundTuning(settings.monetBackgroundTuning as Parameters<SettingsUiState['handleSetMonetBackgroundTuning']>[0]);
+    if (settings.nomandBackgroundTuning !== undefined) state.handleSetNomandBackgroundTuning(settings.nomandBackgroundTuning as Parameters<SettingsUiState['handleSetNomandBackgroundTuning']>[0]);
+    if (settings.latentBackgroundTuning !== undefined) state.handleSetLatentBackgroundTuning(settings.latentBackgroundTuning as Parameters<SettingsUiState['handleSetLatentBackgroundTuning']>[0]);
     if (settings.visualizerTunings === undefined && settings.monetTuning !== undefined) state.handleSetMonetTuning(settings.monetTuning as Parameters<SettingsUiState['handleSetMonetTuning']>[0]);
+    if (settings.visualizerTunings === undefined && settings.pendoloTuning !== undefined) state.handleSetPendoloTuning(settings.pendoloTuning as Parameters<SettingsUiState['handleSetPendoloTuning']>[0]);
     if (settings.urlBackgroundList !== undefined) state.handleSetUrlBackgroundList(settings.urlBackgroundList as Parameters<SettingsUiState['handleSetUrlBackgroundList']>[0]);
     if (settings.urlBackgroundSelectedId !== undefined) state.handleSetUrlBackgroundSelectedId(settings.urlBackgroundSelectedId);
     if (settings.homeLayoutStyle !== undefined) state.handleSetHomeLayoutStyle(settings.homeLayoutStyle);

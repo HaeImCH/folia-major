@@ -6,8 +6,11 @@ const Store = require('electron-store').default || require('electron-store');
 const crypto = require('crypto');
 const { createStageApi } = require('./stageApi.cjs');
 const { createWindowPlaybackHandoffStore } = require('./windowPlaybackHandoff.cjs');
+const { createKugouApiBridge } = require('./kugouApiBridge.cjs');
 const { DEFAULT_DISCORD_APPLICATION_ID, createDiscordPresenceController } = require('./discordPresence.cjs');
 const { createSpotifyController } = require('./spotify.cjs');
+const { createVoiceInputPauseMonitor } = require('./voiceInputPause.cjs');
+const { getReleaseUrl, getUpdateProviderConfig, resolveReleaseChannel } = require('./updateChannels.cjs');
 const { sanitizeDualTheme: sanitizeGeneratedDualTheme } = require('../shared/themeSanitizer.cjs');
 const useLinuxGraphicsDebugMode = process.env.ELECTRON_LINUX_PACKAGED_GRAPHICS === 'true';
 const isAppImageRuntime =
@@ -17,6 +20,28 @@ const linuxGraphicsMode =
   process.platform !== 'linux'
     ? 'system'
     : (process.env.FOLIA_LINUX_GRAPHICS_MODE || (isAppImageRuntime ? 'swiftshader' : 'system'));
+
+// Trusts only the known KuGou media CDN hostname mismatch while preserving TLS checks elsewhere.
+app.on('certificate-error', (event, _webContents, requestUrl, error, _certificate, callback) => {
+  let isAllowedKugouMediaRequest = false;
+  try {
+    const parsedUrl = new URL(requestUrl);
+    isAllowedKugouMediaRequest =
+      parsedUrl.protocol === 'https:' &&
+      parsedUrl.hostname === 'fs.youthandroid2.kugou.com' &&
+      error === 'net::ERR_CERT_COMMON_NAME_INVALID';
+  } catch {
+    isAllowedKugouMediaRequest = false;
+  }
+
+  if (isAllowedKugouMediaRequest) {
+    event.preventDefault();
+    callback(true);
+    return;
+  }
+
+  callback(false);
+});
 
 // Fix for Arch Linux / Wayland & Vulkan compatibility issues
 if (process.platform === 'linux') {
@@ -49,6 +74,7 @@ if (process.platform === 'darwin' && process.arch === 'x64') {
 
 const store = new Store({ projectName: 'Folia' });
 const spotifyPrivateStore = new Store({ projectName: 'Folia', name: 'spotify-auth' });
+const kugouApiBridge = createKugouApiBridge({ store });
 
 // --- Electron main process locale map ---
 const APP_LOCALE_KEY = 'APP_LOCALE';
@@ -134,6 +160,7 @@ const WINDOW_STATE_SAVE_DEBOUNCE_MS = 300;
 const CACHE_DIRECTORY_SETTING_KEY = 'CACHE_DIRECTORY';
 const ENABLE_UPDATE_CHECK_SETTING_KEY = 'ENABLE_UPDATE_CHECK';
 const ENABLE_AUTO_UPDATE_SETTING_KEY = 'ENABLE_AUTO_UPDATE';
+const UPDATE_CHANNEL_SETTING_KEY = 'UPDATE_CHANNEL';
 const LAST_SEEN_UPDATE_VERSION_SETTING_KEY = 'LAST_SEEN_UPDATE_VERSION';
 const STAGE_MODE_ENABLED_SETTING_KEY = 'STAGE_MODE_ENABLED';
 const STAGE_MODE_SOURCE_SETTING_KEY = 'STAGE_MODE_SOURCE';
@@ -149,11 +176,15 @@ const REMOTE_CONTROL_ALWAYS_ON_TOP_SETTING_KEY = 'REMOTE_CONTROL_ALWAYS_ON_TOP';
 const REMOTE_CONTROL_SKIP_TASKBAR_SETTING_KEY = 'REMOTE_CONTROL_SKIP_TASKBAR';
 const MAIN_WINDOW_ALWAYS_ON_TOP_SETTING_KEY = 'MAIN_WINDOW_ALWAYS_ON_TOP';
 const TRANSPARENT_PLAYER_BACKGROUND_SETTING_KEY = 'TRANSPARENT_PLAYER_BACKGROUND';
+const VOICE_INPUT_PAUSE_ENABLED_SETTING_KEY = 'VOICE_INPUT_PAUSE_ENABLED';
 
 const DEFAULT_STAGE_API_PORT = 32107;
 const DEFAULT_OBS_BROWSER_SOURCE_PORT = 32108;
 const FOLIA_RELEASES_URL = 'https://github.com/chthollyphile/folia-major/releases';
-const FOLIA_LATEST_RELEASE_API_URL = 'https://api.github.com/repos/chthollyphile/folia-major/releases/latest';
+const FOLIA_GITHUB_REPOSITORY = {
+  owner: 'chthollyphile',
+  repo: 'folia-major',
+};
 const WINDOWS_APP_USER_MODEL_ID = 'top.izuna.foliamajor';
 const REMOTE_CONTROL_WINDOW_TITLE = 'Folia Remote';
 const WINDOW_PLAYBACK_HANDOFF_REQUEST_TIMEOUT_MS = 800;
@@ -260,6 +291,8 @@ function getPublicSettings() {
     [MAIN_WINDOW_ALWAYS_ON_TOP_SETTING_KEY]: readStoredBoolean(MAIN_WINDOW_ALWAYS_ON_TOP_SETTING_KEY, false),
     [TRANSPARENT_PLAYER_BACKGROUND_SETTING_KEY]: readStoredBoolean(TRANSPARENT_PLAYER_BACKGROUND_SETTING_KEY, false),
     [DISCORD_RICH_PRESENCE_ENABLED_SETTING_KEY]: readStoredBoolean(DISCORD_RICH_PRESENCE_ENABLED_SETTING_KEY, false),
+    [VOICE_INPUT_PAUSE_ENABLED_SETTING_KEY]: readStoredBoolean(VOICE_INPUT_PAUSE_ENABLED_SETTING_KEY, false),
+    [UPDATE_CHANNEL_SETTING_KEY]: getCurrentReleaseChannel().id,
     'enable_player_page_native_blur': store.get('enable_player_page_native_blur') === true,
   };
 }
@@ -349,6 +382,12 @@ const discordPresence = createDiscordPresenceController({
       mainWindow.webContents.send('discord-presence-status-changed', status);
     }
   },
+});
+
+const voiceInputPauseMonitor = createVoiceInputPauseMonitor({
+  getMainWindow: () => mainWindow,
+  isEnabled: () => readStoredBoolean(VOICE_INPUT_PAUSE_ENABLED_SETTING_KEY, false),
+  getOwnExePath: () => process.execPath,
 });
 
 function buildPlaybackSyncBridgeStatus() {
@@ -537,6 +576,10 @@ function getAudioCacheDirectory() {
   return path.join(getConfiguredCacheDirectory(), 'audio');
 }
 
+function getCoverCacheDirectory() {
+  return path.join(getConfiguredCacheDirectory(), 'cover');
+}
+
 function getAudioCacheBaseName(cacheKey) {
   return crypto.createHash('sha256').update(cacheKey).digest('hex');
 }
@@ -544,6 +587,17 @@ function getAudioCacheBaseName(cacheKey) {
 function getAudioCachePaths(cacheKey) {
   const baseName = getAudioCacheBaseName(cacheKey);
   const directory = getAudioCacheDirectory();
+
+  return {
+    directory,
+    dataPath: path.join(directory, `${baseName}.bin`),
+    metaPath: path.join(directory, `${baseName}.json`),
+  };
+}
+
+function getCoverCachePaths(cacheKey) {
+  const baseName = getAudioCacheBaseName(cacheKey);
+  const directory = getCoverCacheDirectory();
 
   return {
     directory,
@@ -863,6 +917,16 @@ function setupFileSystemAccessPermissionHandlers() {
 
 function setupCorsBypassHandlers() {
   const ses = session.defaultSession;
+
+  const getKugouMediaRequestInfo = details => {
+    const parsedUrl = new URL(details.url);
+    const isMediaRequest = details.resourceType === 'media' || parsedUrl.hostname.startsWith('fs.');
+    return isMediaRequest ? {
+      protocol: parsedUrl.protocol,
+      hostname: parsedUrl.hostname,
+      resourceType: details.resourceType,
+    } : null;
+  };
   ses.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
     const originUrl = details.url;
@@ -874,6 +938,7 @@ function setupCorsBypassHandlers() {
       isTargetDomain =
         hostname === 'qq.com' ||
         hostname.endsWith('.qq.com') ||
+        hostname === 'y.gtimg.cn' ||
         hostname === 'kugou.com' ||
         hostname.endsWith('.kugou.com') ||
         hostname === 'amll-ttml-db.stevexmh.net';
@@ -889,6 +954,16 @@ function setupCorsBypassHandlers() {
     }
 
     callback({ cancel: false, responseHeaders });
+  });
+
+  ses.webRequest.onErrorOccurred({ urls: ['*://*.kugou.com/*'] }, details => {
+    const requestInfo = getKugouMediaRequestInfo(details);
+    if (!requestInfo) return;
+    if (requestInfo.resourceType === 'media' && details.error === 'net::ERR_FAILED') return;
+    console.warn('[KuGouMedia] request:error', {
+      ...requestInfo,
+      error: details.error,
+    });
   });
 }
 
@@ -909,8 +984,11 @@ function isAllowedLyricProxyHost(hostname) {
   return (
     hostname === 'qq.com' ||
     hostname.endsWith('.qq.com') ||
+    hostname === 'y.gtimg.cn' ||
     hostname === 'kugou.com' ||
     hostname.endsWith('.kugou.com') ||
+    hostname === 'kgimg.com' ||
+    hostname.endsWith('.kgimg.com') ||
     hostname === 'amll-ttml-db.stevexmh.net'
   );
 }
@@ -1081,36 +1159,50 @@ function getAutoUpdateEnabled() {
   return Boolean(store.get(ENABLE_AUTO_UPDATE_SETTING_KEY));
 }
 
-function isUpdateCheckSupported() {
-  return process.platform === 'win32';
-}
-
-function isAutoUpdaterSupported() {
-  return (
-    process.platform === 'win32' &&
-    app.isPackaged &&
-    process.env.ELECTRON_DEV !== 'true' &&
-    process.env.NODE_ENV !== 'development'
-  );
-}
-
 function normalizeVersion(value) {
   return typeof value === 'string' ? value.trim().replace(/^v/i, '') : '';
 }
 
-function compareVersions(a, b) {
-  const left = normalizeVersion(a).split(/[.+-]/).map((part) => Number.parseInt(part, 10) || 0);
-  const right = normalizeVersion(b).split(/[.+-]/).map((part) => Number.parseInt(part, 10) || 0);
-  const length = Math.max(left.length, right.length, 3);
-
-  for (let index = 0; index < length; index += 1) {
-    const diff = (left[index] || 0) - (right[index] || 0);
-    if (diff !== 0) {
-      return diff > 0 ? 1 : -1;
-    }
+function getPackagedReleaseChannel() {
+  try {
+    const packageJsonPath = path.join(app.getAppPath(), 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    return packageJson.foliaReleaseChannel;
+  } catch {
+    return null;
   }
+}
 
-  return 0;
+function getCurrentReleaseChannel() {
+  return resolveReleaseChannel(
+    app.getVersion(),
+    store.get(UPDATE_CHANNEL_SETTING_KEY) || getPackagedReleaseChannel(),
+  );
+}
+
+function normalizeUpdateChannelSelection(value) {
+  const channel = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return channel === 'realeco' || channel === 'limo' || channel === 'cielo' ? channel : null;
+}
+
+function getUpdateCheckSupportReason() {
+  if (process.platform !== 'win32') {
+    return 'system';
+  }
+  return getCurrentReleaseChannel().updateEnabled ? null : 'channel';
+}
+
+function isUpdateCheckSupported() {
+  return getUpdateCheckSupportReason() === null;
+}
+
+function isAutoUpdaterSupported() {
+  return (
+    isUpdateCheckSupported() &&
+    app.isPackaged &&
+    process.env.ELECTRON_DEV !== 'true' &&
+    process.env.NODE_ENV !== 'development'
+  );
 }
 
 const updateState = {
@@ -1130,6 +1222,8 @@ function getUpdateStatus() {
     ...updateState,
     supported: isAutoUpdaterSupported(),
     updateCheckSupported: isUpdateCheckSupported(),
+    updateCheckSupportReason: getUpdateCheckSupportReason(),
+    platform: process.platform,
     updateCheckEnabled: getUpdateCheckEnabled(),
     autoUpdateEnabled: getAutoUpdateEnabled(),
     lastSeenVersion: store.get(LAST_SEEN_UPDATE_VERSION_SETTING_KEY) || null,
@@ -1169,38 +1263,6 @@ function ensureAutoUpdater() {
   return autoUpdater || null;
 }
 
-async function fetchLatestReleaseMetadata() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
-  if (process.env.FOLIA_MOCK_UPDATE === 'true') {
-    return {
-      tag_name: 'v99.99.99',
-      html_url: 'https://github.com/chthollyphile/folia-major/releases/tag/v99.99.99',
-    };
-  }
-
-  try {
-    const ses = await ensureSystemProxySession();
-    const response = await ses.fetch(FOLIA_LATEST_RELEASE_API_URL, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': `Folia/${app.getVersion()}`,
-      },
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`GitHub release check failed: ${response.status} ${response.statusText}`);
-    }
-
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 function setupAutoUpdater() {
   const updater = ensureAutoUpdater();
   if (!updater) {
@@ -1213,8 +1275,37 @@ function setupAutoUpdater() {
   }
 
   updater.autoDownload = false;
-  updater.allowPrerelease = false;
+  if (getCurrentReleaseChannel().updateEnabled) {
+    configureAutoUpdaterChannel(updater);
+  }
   updater.autoInstallOnAppQuit = false;
+
+  updater.on('checking-for-update', () => {
+    setUpdateState({ status: 'checking', error: null, downloadProgress: null });
+  });
+
+  updater.on('update-available', (info) => {
+    const version = normalizeVersion(info?.version);
+    setUpdateState({
+      status: 'available',
+      availableVersion: version || null,
+      updateUrl: getReleaseUrl(getCurrentReleaseChannel().id, version, FOLIA_RELEASES_URL),
+      error: null,
+      lastCheckedAt: Date.now(),
+      downloadProgress: null,
+    });
+  });
+
+  updater.on('update-not-available', () => {
+    setUpdateState({
+      status: 'latest',
+      availableVersion: null,
+      updateUrl: FOLIA_RELEASES_URL,
+      error: null,
+      lastCheckedAt: Date.now(),
+      downloadProgress: null,
+    });
+  });
 
   updater.on('download-progress', (progress) => {
     setUpdateState({
@@ -1246,6 +1337,17 @@ function setupAutoUpdater() {
   });
 }
 
+function configureAutoUpdaterChannel(updater) {
+  const releaseChannel = getCurrentReleaseChannel();
+  updater.channel = releaseChannel.updaterChannel;
+  updater.allowPrerelease = releaseChannel.allowPrerelease;
+
+  const providerConfig = getUpdateProviderConfig(releaseChannel, FOLIA_GITHUB_REPOSITORY);
+  if (providerConfig) {
+    updater.setFeedURL(providerConfig);
+  }
+}
+
 async function downloadAvailableUpdate() {
   if (!isAutoUpdaterSupported()) {
     setUpdateState({ status: 'unsupported', error: null });
@@ -1272,8 +1374,7 @@ async function downloadAvailableUpdate() {
 
   try {
     setUpdateState({ status: 'downloading', error: null, downloadProgress: null });
-    updater.autoDownload = true;
-    await updater.checkForUpdates();
+    await updater.downloadUpdate();
   } catch (error) {
     setUpdateState({
       status: 'error',
@@ -1296,40 +1397,19 @@ async function checkForUpdates({ manual = false } = {}) {
     return getUpdateStatus();
   }
 
-  setUpdateState({ status: 'checking', error: null, downloadProgress: null });
+  if (!isAutoUpdaterSupported()) {
+    setUpdateState({ status: 'idle', error: null, downloadProgress: null });
+    return getUpdateStatus();
+  }
 
   try {
-    const release = await fetchLatestReleaseMetadata();
-    const latestVersion = normalizeVersion(release?.tag_name || release?.name);
-    const releaseUrl = typeof release?.html_url === 'string' ? release.html_url : FOLIA_RELEASES_URL;
-
-    if (!latestVersion) {
-      throw new Error('Latest release did not include a version tag.');
+    const updater = ensureAutoUpdater();
+    if (!updater) {
+      throw new Error('Failed to initialize auto updater.');
     }
 
-    const hasUpdate = compareVersions(latestVersion, app.getVersion()) > 0;
-    setUpdateState({
-      status: hasUpdate ? 'available' : 'latest',
-      availableVersion: hasUpdate ? latestVersion : null,
-      updateUrl: releaseUrl,
-      error: null,
-      lastCheckedAt: Date.now(),
-      downloadProgress: null,
-    });
-
-    if (hasUpdate && getAutoUpdateEnabled() && isAutoUpdaterSupported()) {
-      const updater = ensureAutoUpdater();
-      if (updater) {
-        updater.autoDownload = true;
-        await updater.checkForUpdates();
-      } else {
-        setUpdateState({
-          status: 'error',
-          error: 'Failed to initialize auto updater.',
-          downloadProgress: null,
-        });
-      }
-    }
+    updater.autoDownload = getAutoUpdateEnabled();
+    await updater.checkForUpdates();
   } catch (error) {
     setUpdateState({
       status: 'error',
@@ -1356,7 +1436,7 @@ function markUpdateSeen(version) {
 async function openUpdateReleasePage(version) {
   const normalizedVersion = normalizeVersion(version || updateState.availableVersion);
   const url = normalizedVersion
-    ? `${FOLIA_RELEASES_URL}/tag/v${normalizedVersion}`
+    ? getReleaseUrl(getCurrentReleaseChannel().id, normalizedVersion, FOLIA_RELEASES_URL)
     : updateState.updateUrl || FOLIA_RELEASES_URL;
 
   await shell.openExternal(url);
@@ -1757,7 +1837,16 @@ ${isPureMusic && songTitle ? `Song title: ${songTitle}\n` : ''}Source snippet:
 ${snippet}`;
 }
 
-function buildOpenAICompatibleRequestBody(model, provider, systemPrompt, sourcePrompt) {
+const DEFAULT_OPENAI_TEMPERATURE = 0.7;
+
+function resolveOpenAICompatibleTemperature(value) {
+  const temperature = typeof value === 'number' ? value : Number.parseFloat(String(value ?? '').trim());
+  return Number.isFinite(temperature) && temperature >= 0 && temperature <= 2
+    ? temperature
+    : DEFAULT_OPENAI_TEMPERATURE;
+}
+
+function buildOpenAICompatibleRequestBody(model, provider, systemPrompt, sourcePrompt, temperature) {
   const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: sourcePrompt }
@@ -1767,7 +1856,7 @@ function buildOpenAICompatibleRequestBody(model, provider, systemPrompt, sourceP
     return {
       model,
       messages,
-      temperature: 0.7,
+      temperature,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -1782,7 +1871,7 @@ function buildOpenAICompatibleRequestBody(model, provider, systemPrompt, sourceP
   return {
     model,
     messages,
-    temperature: 0.7,
+    temperature,
     response_format: { type: 'json_object' },
   };
 }
@@ -1955,6 +2044,87 @@ async function clearAudioCacheDirectory() {
   }
 }
 
+async function ensureCoverCacheDirectory() {
+  await fsp.mkdir(getCoverCacheDirectory(), { recursive: true });
+}
+
+async function readCoverCacheEntry(cacheKey) {
+  const { dataPath, metaPath } = getCoverCachePaths(cacheKey);
+  try {
+    const [dataBuffer, rawMeta] = await Promise.all([
+      fsp.readFile(dataPath),
+      fsp.readFile(metaPath, 'utf-8').catch(() => null),
+    ]);
+    if (dataBuffer.byteLength === 0) {
+      await Promise.allSettled([fsp.rm(dataPath, { force: true }), fsp.rm(metaPath, { force: true })]);
+      return { found: false, data: null, mimeType: null };
+    }
+    try {
+      const parsedMeta = rawMeta ? JSON.parse(rawMeta) : null;
+      const validMeta = parsedMeta
+        && parsedMeta.cacheKey === cacheKey
+        && typeof parsedMeta.mimeType === 'string'
+        && parsedMeta.mimeType.startsWith('image/')
+        && parsedMeta.size === dataBuffer.byteLength;
+      if (!validMeta) throw new Error('Invalid cover cache metadata');
+      return { found: true, data: dataBuffer, mimeType: parsedMeta.mimeType };
+    } catch {
+      await Promise.allSettled([fsp.rm(dataPath, { force: true }), fsp.rm(metaPath, { force: true })]);
+      return { found: false, data: null, mimeType: null };
+    }
+  } catch {
+    return { found: false, data: null, mimeType: null };
+  }
+}
+
+async function writeCoverCacheEntry(cacheKey, data, mimeType) {
+  const { dataPath, metaPath } = getCoverCachePaths(cacheKey);
+  await ensureCoverCacheDirectory();
+  const buffer = Buffer.isBuffer(data)
+    ? data
+    : Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+  if (buffer.byteLength === 0) throw new Error('Cannot persist an empty cover payload');
+  if (typeof mimeType !== 'string' || !mimeType.startsWith('image/')) {
+    throw new Error('Cover cache only accepts image payloads');
+  }
+  await Promise.all([
+    fsp.writeFile(dataPath, buffer),
+    fsp.writeFile(metaPath, JSON.stringify({
+      cacheKey,
+      mimeType: mimeType || 'application/octet-stream',
+      size: buffer.byteLength,
+      updatedAt: Date.now(),
+    }), 'utf-8'),
+  ]);
+}
+
+async function removeCoverCacheEntry(cacheKey) {
+  const { dataPath, metaPath } = getCoverCachePaths(cacheKey);
+  await Promise.allSettled([fsp.rm(dataPath, { force: true }), fsp.rm(metaPath, { force: true })]);
+}
+
+async function getCoverCacheUsageBytes() {
+  try {
+    const entries = await fsp.readdir(getCoverCacheDirectory(), { withFileTypes: true });
+    let total = 0;
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.bin')) continue;
+      total += (await fsp.stat(path.join(getCoverCacheDirectory(), entry.name))).size;
+    }
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+async function clearCoverCacheDirectory() {
+  try {
+    await fsp.rm(getCoverCacheDirectory(), { recursive: true, force: true });
+  } catch (error) {
+    console.warn('[CoverCache] Failed to clear cache directory', error);
+  }
+}
+
 const { register_anonimous } = require('@neteasecloudmusicapienhanced/api/main');
 const { getXeapiPublicKey } = require('@neteasecloudmusicapienhanced/api/util/xeapiKey');
 const {
@@ -1963,6 +2133,10 @@ const {
   generateRandomChineseIP,
 } = require('@neteasecloudmusicapienhanced/api/util/index');
 const { serveNcmApi } = require('@neteasecloudmusicapienhanced/api/server');
+const {
+  refreshAnonymousToken,
+  resolveXeapiPublicKey,
+} = require('./neteaseApiStartup.cjs');
 
 const net = require('net');
 let assignedPort = 30000; // default fallback
@@ -2031,17 +2205,20 @@ async function initializeNcmApiRuntime() {
     }
   }
 
-  const nextPublicKey = await getXeapiPublicKey(currentPublicKey, global.deviceId);
-  fs.writeFileSync(xeapiPublicKeyPath, JSON.stringify(nextPublicKey), 'utf-8');
-
-  const anonymousRegistration = await register_anonimous();
-  const anonymousCookie = anonymousRegistration?.body?.cookie;
-  if (typeof anonymousCookie === 'string' && anonymousCookie.trim()) {
-    const cookieObject = cookieToJson(anonymousCookie);
-    if (typeof cookieObject.MUSIC_A === 'string') {
-      fs.writeFileSync(tokenPath, cookieObject.MUSIC_A, 'utf-8');
-    }
+  const { publicKey: nextPublicKey, refreshed } = await resolveXeapiPublicKey({
+    currentPublicKey,
+    deviceId: global.deviceId,
+    getXeapiPublicKey,
+  });
+  if (refreshed) {
+    fs.writeFileSync(xeapiPublicKeyPath, JSON.stringify(nextPublicKey), 'utf-8');
   }
+
+  await refreshAnonymousToken({
+    registerAnonymous: register_anonimous,
+    cookieToJson,
+    persistToken: (token) => fs.writeFileSync(tokenPath, token, 'utf-8'),
+  });
 }
 
 async function startApi() {
@@ -2754,6 +2931,7 @@ app.whenReady().then(async () => {
   createWindow();
   focusMainWindow();
   scheduleStartupUpdateCheck();
+  voiceInputPauseMonitor.syncState();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2774,6 +2952,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   clearPendingWindowPlaybackHandoffRequests();
   spotify.stop();
+  voiceInputPauseMonitor.stop();
   void discordPresence.destroy();
 });
 
@@ -2800,13 +2979,21 @@ ipcMain.handle('save-settings', (event, key, value) => {
   }
 
   let nextValue = value;
+  if (key === UPDATE_CHANNEL_SETTING_KEY) {
+    const channel = normalizeUpdateChannelSelection(value);
+    if (!channel) {
+      return getPublicSettings();
+    }
+    nextValue = channel;
+  }
   if (
     key === MINIMIZE_TO_TRAY_SETTING_KEY ||
     key === HIDE_TASKBAR_ICON_SETTING_KEY ||
     key === REMOTE_CONTROL_ALWAYS_ON_TOP_SETTING_KEY ||
     key === REMOTE_CONTROL_SKIP_TASKBAR_SETTING_KEY ||
     key === TRANSPARENT_PLAYER_BACKGROUND_SETTING_KEY ||
-    key === DISCORD_RICH_PRESENCE_ENABLED_SETTING_KEY
+    key === DISCORD_RICH_PRESENCE_ENABLED_SETTING_KEY ||
+    key === VOICE_INPUT_PAUSE_ENABLED_SETTING_KEY
   ) {
     nextValue = Boolean(value);
   }
@@ -2852,6 +3039,30 @@ ipcMain.handle('save-settings', (event, key, value) => {
     }
   }
 
+  if (key === UPDATE_CHANNEL_SETTING_KEY) {
+    const updater = ensureAutoUpdater();
+    if (updater) {
+      configureAutoUpdaterChannel(updater);
+    }
+
+    setUpdateState({
+      status: getUpdateCheckEnabled() && isUpdateCheckSupported() ? 'idle' : 'unsupported',
+      availableVersion: null,
+      updateUrl: FOLIA_RELEASES_URL,
+      error: null,
+      downloadProgress: null,
+    });
+
+    if (getUpdateCheckEnabled() && isAutoUpdaterSupported()) {
+      checkForUpdates().catch((error) => {
+        setUpdateState({
+          status: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  }
+
   if (key === HIDE_TASKBAR_ICON_SETTING_KEY) {
     setMainWindowSkipTaskbarEnabled(nextValue);
   }
@@ -2875,6 +3086,10 @@ ipcMain.handle('save-settings', (event, key, value) => {
   if (key === DISCORD_RICH_PRESENCE_ENABLED_SETTING_KEY) {
     void discordPresence.refresh();
     broadcastPlaybackSyncBridgeStatus();
+  }
+
+  if (key === VOICE_INPUT_PAUSE_ENABLED_SETTING_KEY) {
+    voiceInputPauseMonitor.syncState();
   }
 
   return getPublicSettings();
@@ -2988,6 +3203,29 @@ ipcMain.handle('clear-audio-cache', async () => {
   return true;
 });
 
+ipcMain.handle('get-cover-cache', async (event, cacheKey) => {
+  return readCoverCacheEntry(cacheKey);
+});
+
+ipcMain.handle('save-cover-cache', async (event, cacheKey, data, mimeType) => {
+  await writeCoverCacheEntry(cacheKey, data, mimeType);
+  return true;
+});
+
+ipcMain.handle('remove-cover-cache', async (event, cacheKey) => {
+  await removeCoverCacheEntry(cacheKey);
+  return true;
+});
+
+ipcMain.handle('get-cover-cache-usage', async () => {
+  return getCoverCacheUsageBytes();
+});
+
+ipcMain.handle('clear-cover-cache', async () => {
+  await clearCoverCacheDirectory();
+  return true;
+});
+
 // Retrieve dynamic port of local Netease API Server
 ipcMain.handle('get-netease-port', () => {
   return assignedPort;
@@ -2996,6 +3234,9 @@ ipcMain.handle('get-netease-port', () => {
 ipcMain.handle('get-netease-api-status', () => {
   return neteaseApiStatus;
 });
+
+ipcMain.handle('kugou-api-status', () => kugouApiBridge.getStatus());
+ipcMain.handle('kugou-api-request', (_event, operation, params) => kugouApiBridge.request(operation, params));
 
 ipcMain.handle('window-minimize', () => {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -3249,6 +3490,14 @@ ipcMain.handle('spotify-control-playback', (event, command) => {
     throw new Error('Untrusted renderer attempted to control Spotify playback.');
   }
   return spotify.controlPlayback(command);
+});
+
+ipcMain.handle('voice-input-pause-get-status', (event) => {
+  if (!isTrustedMainWindowContents(event.sender)) {
+    throw new Error('Untrusted renderer attempted to read voice input pause status.');
+  }
+
+  return voiceInputPauseMonitor.getStatus();
 });
 
 ipcMain.handle('stage-get-status', () => {
@@ -3594,6 +3843,7 @@ ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
       const apiKey = store.get('OPENAI_API_KEY');
       const apiUrl = normalizeOpenAIChatCompletionsUrl(store.get('OPENAI_API_URL'));
       const model = resolveOpenAICompatibleModel(apiUrl, store.get('OPENAI_API_MODEL'));
+      const temperature = resolveOpenAICompatibleTemperature(store.get('OPENAI_API_TEMPERATURE'));
       const openAICompatibleProvider = detectOpenAICompatibleProvider(apiUrl, model);
       const systemPrompt = buildThemeSystemPrompt(true);
       const sourcePrompt = buildThemeSourcePrompt(snippet, isPureMusic, songTitle);
@@ -3608,7 +3858,7 @@ ipcMain.handle('generate-theme', async (event, lyricsText, options = {}) => {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(buildOpenAICompatibleRequestBody(model, openAICompatibleProvider, systemPrompt, sourcePrompt)),
+        body: JSON.stringify(buildOpenAICompatibleRequestBody(model, openAICompatibleProvider, systemPrompt, sourcePrompt, temperature)),
       });
 
       if (!response.ok) {

@@ -1,10 +1,16 @@
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 // test/unit/spotify/spotifyMain.test.ts
 // Verifies the main-process Spotify PKCE and playback normalization boundaries.
 
 const require = createRequire(import.meta.url);
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(currentDir, '../../..');
+const readRepoFile = (relativePath: string) => readFile(path.join(repoRoot, relativePath), 'utf8');
 const {
     buildCodeChallenge,
     buildSpotifyPlaybackControlRequest,
@@ -18,6 +24,29 @@ const {
 };
 
 describe('Spotify main-process helpers', () => {
+    it('keeps the Spotify controller wired through the trusted Electron bridge', async () => {
+        const [mainSource, preloadSource, stageApiSource] = await Promise.all([
+            readRepoFile('electron/main.cjs'),
+            readRepoFile('electron/preload.cjs'),
+            readRepoFile('electron/stageApi.cjs'),
+        ]);
+
+        expect(mainSource).toContain("const { createSpotifyController } = require('./spotify.cjs');");
+        expect(mainSource).toContain("name: 'spotify-auth'");
+        expect(mainSource).toContain("ipcMain.handle('spotify-get-status'");
+        expect(mainSource).toContain("ipcMain.handle('spotify-connect'");
+        expect(mainSource).toContain("ipcMain.handle('spotify-control-playback'");
+        expect(mainSource).toContain('isTrustedMainWindowContents(event.sender)');
+        expect(mainSource).toContain('spotify.stop();');
+
+        expect(preloadSource).toContain("getSpotifyStatus: () => ipcRenderer.invoke('spotify-get-status')");
+        expect(preloadSource).toContain("controlSpotifyPlayback: (command) => ipcRenderer.invoke('spotify-control-playback', command)");
+        expect(preloadSource).toContain("ipcRenderer.on('spotify-status-changed', listener)");
+
+        expect(stageApiSource).toContain("configuredSource === 'spotify'");
+        expect(stageApiSource).toContain("configuredSource === 'playercap'");
+    });
+
     it('builds the RFC 7636 S256 challenge', () => {
         expect(buildCodeChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')).toBe(
             'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',

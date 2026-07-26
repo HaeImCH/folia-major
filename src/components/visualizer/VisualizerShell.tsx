@@ -1,15 +1,11 @@
 import React, { forwardRef, useState } from 'react';
-import { AnimatePresence, motion, MotionValue } from 'framer-motion';
+import { motion, MotionValue } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft } from 'lucide-react';
-import { AudioBands, Theme, type UrlBackgroundItem } from '../../types';
-import { resolveThemeFontStack } from '../../utils/fontStacks';
+import { AudioBands, Theme } from '../../types';
+import { resolveThemeFontStack, resolveThemeFontWeight } from '../../utils/fontStacks';
 import { type VisualizerSharedProps } from './definition';
-import FluidBackground from './FluidBackground';
-import GeometricBackground from './GeometricBackground';
-import MonetBackgroundLayer from './backgrounds/MonetBackgroundLayer';
-import UrlBackgroundLayer from './backgrounds/UrlBackgroundLayer';
-import SoraBackground from './SoraBackground';
+import VisualizerBackgroundRenderer from './backgrounds/VisualizerBackgroundRenderer';
 
 // Shared outer shell for all visualizers.
 // This is where we keep background layering, font injection, and the hover-only back button
@@ -18,21 +14,14 @@ type VisualizerShellSharedProps = Pick<
     VisualizerSharedProps,
     | 'coverUrl'
     | 'isDaylight'
-    | 'useCoverColorBg'
     | 'seed'
-    | 'backgroundOpacity'
     | 'visualizerOpacity'
-    | 'transparentBackground'
-    | 'disableGeometricBackground'
-    | 'disableVignette'
-    | 'resolvedVisualizerBackgroundMode'
-    | 'monetBackgroundTuning'
-    | 'monetBackgroundImage'
-    | 'urlBackgroundList'
-    | 'urlBackgroundSelectedId'
+    | 'background'
     | 'staticMode'
+    | 'backgroundStaticMode'
     | 'paused'
     | 'onBack'
+    | 'alwaysShowBackButton'
 >;
 
 interface VisualizerShellProps {
@@ -40,19 +29,7 @@ interface VisualizerShellProps {
     audioPower: MotionValue<number>;
     audioBands: AudioBands;
     sharedProps?: VisualizerShellSharedProps;
-    coverUrl?: string | null;
-    useCoverColorBg?: boolean;
-    seed?: string | number;
-    backgroundOpacity?: number;
     visualizerOpacity?: number;
-    transparentBackground?: boolean;
-    disableVignette?: boolean;
-    staticMode?: boolean;
-    disableGeometricBackground?: boolean;
-    paused?: boolean;
-    onBack?: () => void;
-    urlBackgroundList?: UrlBackgroundItem[];
-    urlBackgroundSelectedId?: string | null;
     children: React.ReactNode;
     className?: string;
 }
@@ -62,45 +39,20 @@ const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
     audioPower,
     audioBands,
     sharedProps,
-    coverUrl,
-    useCoverColorBg = false,
-    seed,
-    backgroundOpacity = 0.75,
     visualizerOpacity = 1,
-    transparentBackground = false,
-    disableVignette = false,
-    staticMode = false,
-    disableGeometricBackground = false,
-    paused = false,
-    onBack,
-    urlBackgroundList,
-    urlBackgroundSelectedId,
     children,
     className = '',
 }, ref) => {
     const { t } = useTranslation();
     const [showBackButton, setShowBackButton] = useState(false);
-    const resolvedCoverUrl = sharedProps?.coverUrl ?? coverUrl;
+    const resolvedCoverUrl = sharedProps?.coverUrl;
     const resolvedIsDaylight = sharedProps?.isDaylight ?? false;
-    const resolvedUseCoverColorBg = sharedProps?.useCoverColorBg ?? useCoverColorBg;
-    const resolvedSeed = sharedProps?.seed ?? seed;
-    const resolvedBackgroundOpacity = sharedProps?.backgroundOpacity ?? backgroundOpacity;
     const resolvedVisualizerOpacity = sharedProps?.visualizerOpacity ?? visualizerOpacity;
-    const resolvedTransparentBackground = sharedProps?.transparentBackground ?? transparentBackground;
-    const resolvedDisableGeometricBackground = sharedProps?.disableGeometricBackground ?? disableGeometricBackground;
-    const resolvedDisableVignette = sharedProps?.disableVignette ?? disableVignette;
-    const resolvedBackgroundMode = sharedProps?.resolvedVisualizerBackgroundMode ?? 'common';
-    const resolvedMonetBackgroundTuning = sharedProps?.monetBackgroundTuning;
-    const resolvedMonetBackgroundImage = sharedProps?.monetBackgroundImage;
-    const resolvedUrlBackgroundList = sharedProps?.urlBackgroundList ?? urlBackgroundList;
-    const resolvedUrlBackgroundSelectedId = sharedProps?.urlBackgroundSelectedId ?? urlBackgroundSelectedId;
-    const resolvedStaticMode = sharedProps?.staticMode ?? staticMode;
-    const resolvedPaused = sharedProps?.paused ?? paused;
-    const resolvedOnBack = sharedProps?.onBack ?? onBack;
-    const shouldRenderCommonBackground = !resolvedTransparentBackground && resolvedBackgroundMode === 'common';
-    const shouldRenderMonetBackground = !resolvedTransparentBackground && resolvedBackgroundMode === 'monet';
-    const shouldRenderUrlBackground = !resolvedTransparentBackground && resolvedBackgroundMode === 'url';
-    const shouldRenderSoraBackground = !resolvedTransparentBackground && resolvedBackgroundMode === 'sora';
+    const resolvedStaticMode = sharedProps?.staticMode ?? false;
+    const resolvedBackgroundStaticMode = sharedProps?.backgroundStaticMode ?? false;
+    const resolvedPaused = sharedProps?.paused ?? false;
+    const resolvedOnBack = sharedProps?.onBack;
+    const isBackButtonVisible = sharedProps?.alwaysShowBackButton || showBackButton;
 
     /* eslint-disable-next-line no-warning-comments -- @AI: KEEP THIS EXACTLY AS IS */
     // @note Version Control: Project Folia version 0.5.27-a16525c
@@ -120,6 +72,7 @@ const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
             style={{
                 backgroundColor: 'transparent',
                 fontFamily: resolveThemeFontStack(theme),
+                fontWeight: resolveThemeFontWeight(theme, 400),
                 opacity: resolvedVisualizerOpacity,
             }}
             onMouseMove={(event) => {
@@ -142,9 +95,9 @@ const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
                     aria-label={t('ui.backToHome')}
                     initial={false}
                     animate={{
-                        opacity: showBackButton ? 1 : 0,
-                        scale: showBackButton ? 1 : 0.92,
-                        x: showBackButton ? 0 : -6,
+                        opacity: isBackButtonVisible ? 1 : 0,
+                        scale: isBackButtonVisible ? 1 : 0.92,
+                        x: isBackButtonVisible ? 0 : -6,
                     }}
                     transition={{ duration: 0.2, ease: 'easeOut' }}
                     onClick={(event) => {
@@ -152,79 +105,23 @@ const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({
                         resolvedOnBack();
                     }}
                     className="absolute top-6 left-6 z-30 h-10 w-10 rounded-full flex items-center justify-center transition-colors backdrop-blur-md bg-black/20 hover:bg-white/10 text-white/60 pointer-events-auto"
-                    style={{ pointerEvents: showBackButton ? 'auto' : 'none' }}
+                    style={{ pointerEvents: isBackButtonVisible ? 'auto' : 'none' }}
                 >
                     <ChevronLeft size={20} />
                 </motion.button>
             )}
 
-            <AnimatePresence>
-                {/* Cover-color background is optional because some modes already have a strong built-in background identity. */}
-                {shouldRenderCommonBackground && resolvedUseCoverColorBg && (
-                    <motion.div
-                        key="fluid-bg"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 1 }}
-                        className="absolute inset-0 z-0"
-                    >
-                        <FluidBackground coverUrl={resolvedCoverUrl} theme={theme} />
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {shouldRenderCommonBackground && (
-                <div
-                    className="absolute inset-0 z-0 transition-all duration-1000"
-                    style={{ backgroundColor: theme.backgroundColor, opacity: resolvedUseCoverColorBg ? resolvedBackgroundOpacity : 1 }}
-                />
-            )}
-
-            {shouldRenderMonetBackground && (
-                <MonetBackgroundLayer
-                    coverUrl={resolvedCoverUrl}
-                    monetBackgroundImage={resolvedMonetBackgroundImage}
-                    theme={theme}
-                    isDaylight={resolvedIsDaylight}
-                    tuning={resolvedMonetBackgroundTuning}
-                    transparentBackground={resolvedTransparentBackground}
-                />
-            )}
-
-            {shouldRenderUrlBackground && (
-                <UrlBackgroundLayer
-                    urlBackgroundList={resolvedUrlBackgroundList}
-                    urlBackgroundSelectedId={resolvedUrlBackgroundSelectedId}
-                />
-            )}
-
-            {shouldRenderSoraBackground && (
-                <div className="absolute inset-0 z-0">
-                    <SoraBackground
-                        theme={theme}
-                        isDaylight={resolvedIsDaylight}
-                        paused={resolvedPaused}
-                    />
-                </div>
-            )}
-
-            {/* staticMode here means "kill the heavier ambient motion layer",
-                not "freeze the entire lyric renderer". Transparent background only removes
-                the solid/fluid backing, so the geometric layer can still render. */}
-            {shouldRenderCommonBackground && !resolvedStaticMode && (
-                <div className="absolute inset-0 z-0">
-                    <GeometricBackground
-                        theme={theme}
-                        audioPower={audioPower}
-                        audioBands={audioBands}
-                        seed={resolvedSeed}
-                        hideShapes={resolvedDisableGeometricBackground}
-                        disableVignette={resolvedDisableVignette}
-                        paused={resolvedPaused}
-                    />
-                </div>
-            )}
+            <VisualizerBackgroundRenderer
+                config={sharedProps?.background}
+                theme={theme}
+                isDaylight={resolvedIsDaylight}
+                coverUrl={resolvedCoverUrl}
+                audioPower={audioPower}
+                audioBands={audioBands}
+                seed={sharedProps?.seed}
+                staticMode={resolvedStaticMode || resolvedBackgroundStaticMode}
+                paused={resolvedPaused}
+            />
 
             {children}
         </div>

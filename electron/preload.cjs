@@ -25,6 +25,11 @@ contextBridge.exposeInMainWorld('electron', {
     getAudioCacheUsage: () => ipcRenderer.invoke('get-audio-cache-usage'),
     getAudioCacheStats: () => ipcRenderer.invoke('get-audio-cache-stats'),
     clearAudioCache: () => ipcRenderer.invoke('clear-audio-cache'),
+    getCoverCache: (cacheKey) => ipcRenderer.invoke('get-cover-cache', cacheKey),
+    saveCoverCache: (cacheKey, data, mimeType) => ipcRenderer.invoke('save-cover-cache', cacheKey, data, mimeType),
+    removeCoverCache: (cacheKey) => ipcRenderer.invoke('remove-cover-cache', cacheKey),
+    getCoverCacheUsage: () => ipcRenderer.invoke('get-cover-cache-usage'),
+    clearCoverCache: () => ipcRenderer.invoke('clear-cover-cache'),
     generateTheme: (lyricsText, options) => ipcRenderer.invoke('generate-theme', lyricsText, options),
     fetchLyricProxy: (url, init) => ipcRenderer.invoke('lyric-proxy-fetch', url, init),
     getNeteasePort: () => ipcRenderer.invoke('get-netease-port'),
@@ -34,6 +39,8 @@ contextBridge.exposeInMainWorld('electron', {
         ipcRenderer.on('netease-api-status-changed', listener);
         return () => ipcRenderer.removeListener('netease-api-status-changed', listener);
     },
+    getKugouApiStatus: () => ipcRenderer.invoke('kugou-api-status'),
+    kugouRequest: (operation, params) => ipcRenderer.invoke('kugou-api-request', operation, params),
     minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
     toggleMaximizeWindow: () => ipcRenderer.invoke('window-toggle-maximize'),
     toggleFullscreenWindow: () => ipcRenderer.invoke('window-toggle-fullscreen'),
@@ -77,6 +84,12 @@ contextBridge.exposeInMainWorld('electron', {
         const listener = (_event, status) => callback(status);
         ipcRenderer.on('spotify-status-changed', listener);
         return () => ipcRenderer.removeListener('spotify-status-changed', listener);
+    },
+    getVoiceInputPauseStatus: () => ipcRenderer.invoke('voice-input-pause-get-status'),
+    onVoiceInputStateChanged: (callback) => {
+        const listener = (_event, state) => callback(state);
+        ipcRenderer.on('voice-input-state-changed', listener);
+        return () => ipcRenderer.removeListener('voice-input-state-changed', listener);
     },
     onPlaybackSyncBridgeStatusChanged: (callback) => {
         const listener = (_event, status) => callback(status);

@@ -4,6 +4,7 @@ import { X, Play, Plus } from 'lucide-react';
 import { List as VirtualList } from 'react-window';
 import { useTranslation } from 'react-i18next';
 import { getSizedCoverUrl } from '../../utils/coverUrl';
+import { getSongArtistLabel, getSongCoverUrl } from '../../services/onlineMusic/songMetadata';
 
 export interface SidePanelListProps<T> {
     isOpen: boolean;
@@ -14,6 +15,9 @@ export interface SidePanelListProps<T> {
     itemHeight: number;
     isDaylight: boolean;
     focusedIndex?: number;
+    hideTitle?: boolean;
+    headerLeadingActions?: React.ReactNode;
+    headerActions?: React.ReactNode;
 }
 
 const RowComponent = ({ index, style, items, renderItem }: any): React.ReactElement => {
@@ -29,6 +33,9 @@ export function SidePanelList<T>({
     itemHeight,
     isDaylight,
     focusedIndex,
+    hideTitle = false,
+    headerLeadingActions,
+    headerActions,
 }: SidePanelListProps<T>) {
     const { t } = useTranslation();
     const [listHeight, setListHeight] = useState(400);
@@ -100,16 +107,24 @@ export function SidePanelList<T>({
                     }}
                 >
                     {/* Header */}
-                    <div className="flex items-center justify-between mb-4 shrink-0">
-                        <h3 className="font-bold text-lg tracking-tight truncate pr-2">
-                            {title}
-                        </h3>
-                        <button
-                            onClick={onClose}
-                            className="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors shrink-0"
-                        >
-                            <X size={18} />
-                        </button>
+                    <div className="flex items-center justify-between gap-2 mb-4 shrink-0">
+                        <div className="min-w-0 flex-1">
+                            {headerLeadingActions}
+                            {!hideTitle && (
+                                <h3 className="font-bold text-lg tracking-tight truncate pr-2">
+                                    {title}
+                                </h3>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                            {headerActions}
+                            <button
+                                onClick={onClose}
+                                className="p-1.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
                     </div>
 
                     {/* List Area */}
@@ -147,8 +162,8 @@ export const TrackListItem = React.memo<{
     isActive?: boolean;
 }>(({ track, index, style, onPlay, onAddToQueue, isUnavailable, isActive }) => {
     const { t } = useTranslation();
-    const coverUrl = track.al?.picUrl || track.album?.picUrl || '';
-    const artistName = track.ar?.[0]?.name || track.artists?.[0]?.name || 'Unknown Artist';
+    const coverUrl = getSongCoverUrl(track) || '';
+    const artistName = getSongArtistLabel(track).split(',')[0]?.trim() || 'Unknown Artist';
     
     return (
         <div 

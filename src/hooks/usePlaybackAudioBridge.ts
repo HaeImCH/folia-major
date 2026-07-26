@@ -3,8 +3,10 @@ import type { MutableRefObject, RefObject } from 'react';
 import { PlayerState } from '../types';
 import type { ReplayGainMode, SongResult, StatusMessage } from '../types';
 import type { LocalSong } from '../types';
-import { hasCachedAudio, saveAudioBlob } from '../services/audioCache';
-import { getOnlineSongCacheKey } from '../services/netease';
+import { saveAudioBlob } from '../services/audioCache';
+import { hasCachedSongAudio } from '../services/onlineMusic/resourceCache';
+import { getSongResourceCacheKey } from '../services/onlineMusic/resourceKeys';
+import { resolveNavidromePlaybackCarrier } from '../utils/appPlaybackGuards';
 import { saveToCache } from '../services/db';
 
 // src/hooks/usePlaybackAudioBridge.ts
@@ -13,6 +15,7 @@ type UsePlaybackAudioBridgeParams = {
     audioRef: RefObject<HTMLAudioElement | null>;
     audioSrc: string | null;
     currentSong: SongResult | null;
+    localSongs: LocalSong[];
     isLyricsLoading: boolean;
     enableMediaCache: boolean;
     isPanelOpen: boolean;
@@ -38,6 +41,7 @@ export function usePlaybackAudioBridge({
     audioRef,
     audioSrc,
     currentSong,
+    localSongs,
     isLyricsLoading,
     enableMediaCache,
     isPanelOpen,
@@ -89,7 +93,7 @@ export function usePlaybackAudioBridge({
     const cacheSongAssets = useCallback(async () => {
         if (!currentSong || !audioSrc || audioSrc.startsWith('blob:')) return;
 
-        const existing = await hasCachedAudio(getOnlineSongCacheKey('audio', currentSong));
+        const existing = await hasCachedSongAudio(currentSong);
         if (existing || !enableMediaCache) return;
 
         console.log('[Cache] Caching fully played song:', currentSong.name);
@@ -97,7 +101,7 @@ export function usePlaybackAudioBridge({
         try {
             const response = await fetch(audioSrc);
             const blob = await response.blob();
-            await saveAudioBlob(getOnlineSongCacheKey('audio', currentSong), blob);
+            await saveAudioBlob(getSongResourceCacheKey('audio', currentSong), blob);
             console.log('[Cache] Audio saved');
         } catch (error) {
             console.error('[Cache] Failed to download audio for cache', error);
@@ -108,7 +112,7 @@ export function usePlaybackAudioBridge({
             try {
                 const response = await fetch(coverUrl, { mode: 'cors' });
                 const blob = await response.blob();
-                await saveToCache(getOnlineSongCacheKey('cover', currentSong), blob);
+                await saveToCache(getSongResourceCacheKey('cover', currentSong), blob);
                 console.log('[Cache] Cover saved');
             } catch (error) {
                 console.error('[Cache] Failed to download cover for cache', error);
@@ -135,8 +139,9 @@ export function usePlaybackAudioBridge({
 
         let replayGainDb = 0;
         let replayGainPeak: number | undefined;
-        if ((currentSong as SongResult & { isLocal?: boolean; localData?: LocalSong }).isLocal && (currentSong as SongResult & { localData?: LocalSong }).localData) {
-            const localData = (currentSong as SongResult & { localData: LocalSong }).localData;
+        const localSongId = (currentSong as SongResult & { localRef?: { songId: string } }).localRef?.songId;
+        const localData = localSongId ? localSongs.find(song => song.id === localSongId) : undefined;
+        if ((currentSong as SongResult & { isLocal?: boolean }).isLocal && localData) {
 
             if (replayGainMode === 'track') {
                 replayGainDb = typeof localData.replayGainTrackGain === 'number'
@@ -150,6 +155,18 @@ export function usePlaybackAudioBridge({
                         ? localData.replayGainTrackGain
                         : (typeof localData.replayGain === 'number' ? localData.replayGain : 0));
                 replayGainPeak = localData.replayGainAlbumPeak ?? localData.replayGainTrackPeak;
+            }
+        }
+
+        const navidromeSong = resolveNavidromePlaybackCarrier(currentSong);
+        const navidromeReplayGain = navidromeSong?.navidromeData.replayGain;
+        if (navidromeReplayGain) {
+            if (replayGainMode === 'track') {
+                replayGainDb = navidromeReplayGain.trackGain ?? 0;
+                replayGainPeak = navidromeReplayGain.trackPeak;
+            } else if (replayGainMode === 'album') {
+                replayGainDb = navidromeReplayGain.albumGain ?? navidromeReplayGain.trackGain ?? 0;
+                replayGainPeak = navidromeReplayGain.albumPeak ?? navidromeReplayGain.trackPeak;
             }
         }
 
@@ -185,7 +202,7 @@ export function usePlaybackAudioBridge({
         } catch (error) {
             console.warn('[AudioContext] Failed to apply ReplayGain', error);
         }
-    }, [audioContextRef, currentSong, gainNodeRef, getTargetPlaybackVolume, replayGainLinearRef, replayGainMode, syncOutputGain]);
+    }, [audioContextRef, currentSong, gainNodeRef, getTargetPlaybackVolume, localSongs, replayGainLinearRef, replayGainMode, syncOutputGain]);
 
     useEffect(() => {
         const audioElement = audioRef.current;

@@ -9,6 +9,8 @@ import type {
     CommandPaletteMatch,
     CommandPaletteSearchSource,
 } from './types';
+import type { SearchSource } from '../../stores/useSearchNavigationStore';
+import { getProviderSongMetadata } from '../../services/onlineMusic/songMetadata';
 
 // src/components/command-palette/commandRegistry.ts
 // Defines command palette entries and the lightweight matching used for autocomplete.
@@ -18,19 +20,18 @@ const MAX_COMMAND_MATCHES = 10;
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
 
 const getSongArtistLabel = (song: SongResult) => {
-    const artists = song.ar?.length ? song.ar : song.artists;
-    return artists?.map(artist => artist.name).filter(Boolean).join(', ') || '';
+    return getProviderSongMetadata(song).artists.map(artist => artist.name).filter(Boolean).join(', ');
 };
 
-const getSongAlbumLabel = (song: SongResult) => song.al?.name || song.album?.name || '';
+const getSongAlbumLabel = (song: SongResult) => getProviderSongMetadata(song).album?.name || '';
 
 const buildQueueSearchText = (song: SongResult, index: number) => [
     String(index + 1),
     song.name,
     getSongArtistLabel(song),
     getSongAlbumLabel(song),
-    ...(song.alia ?? []),
-    ...(song.tns ?? []),
+    ...getProviderSongMetadata(song).aliases,
+    ...getProviderSongMetadata(song).translatedNames,
 ].filter(Boolean).join(' ');
 
 const buildQueueSongDescription = (song: SongResult, index: number, context: CommandPaletteContext) => {
@@ -38,7 +39,7 @@ const buildQueueSongDescription = (song: SongResult, index: number, context: Com
     return metadata || context.t('commandPalette.queueIndex', 'Queue #{{index}}').replace('{{index}}', String(index + 1));
 };
 
-const getSearchSourceLabel = (sourceTab: HomeViewTab, context: CommandPaletteContext) => {
+const getSearchSourceLabel = (sourceTab: SearchSource, context: CommandPaletteContext) => {
     if (sourceTab === 'local') {
         return context.t('commandPalette.sourceLocal', 'local library');
     }
@@ -50,7 +51,7 @@ const getSearchSourceLabel = (sourceTab: HomeViewTab, context: CommandPaletteCon
 
 const buildSearchPreview = (
     input: string,
-    sourceTab: HomeViewTab,
+    sourceTab: SearchSource,
     context: CommandPaletteContext,
     isCurrentSource: boolean
 ) => {
@@ -83,6 +84,7 @@ const runSearch = async (
         sourceTab,
         deps: {
             localSongs: context.localSongs,
+            localLibraryCatalog: context.localLibraryCatalog,
             t: context.t,
         },
         returnView: 'player',
@@ -105,7 +107,7 @@ const createSearchCommand = (
     title: string,
     description: string,
     keywords: string[],
-    resolveSource: (context: CommandPaletteContext) => HomeViewTab
+    resolveSource: (context: CommandPaletteContext) => SearchSource
 ): CommandPaletteCommand => ({
     id,
     group: 'search',
@@ -236,7 +238,7 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
     createSearchCommand('search-current', 'Search songs', 'Search songs in the current source', ['search', 'find', 'song', '搜索', '搜歌', 'sousuo', 'souge', 'ss', 'sg'], context => context.currentSearchSourceTab),
     createSearchCommand('search-local', 'Search local songs', 'Search local library', ['local', 'local search', 'search local', '本地', '本地音乐', 'bendi', 'bendiyinyue', 'bd', 'bdyy'], () => 'local'),
     createSearchCommand('search-navidrome', 'Search Navidrome songs', 'Search Navidrome library', ['navi', 'navidrome', 'search navidrome', '导航', '服务器', 'fuwuqi', 'fwq'], () => 'navidrome'),
-    createSearchCommand('search-netease', 'Search NetEase songs', 'Search NetEase Cloud Music', ['netease', 'cloud', 'search netease', '网易云', '网抑云', 'wangyiyun', 'wyy'], () => 'playlist'),
+    createSearchCommand('search-netease', 'Search NetEase songs', 'Search NetEase Cloud Music', ['netease', 'cloud', 'search netease', '网易云', '网抑云', 'wangyiyun', 'wyy'], () => 'netease'),
     createQueueSearchCommand(),
 
     createSettingsCommand('settings-help', 'Open Help', 'Open help and shortcuts', ['help', '帮助', 'bangzhu', 'bz'], 'help'),
@@ -280,6 +282,18 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
         },
     },
     createSettingsCommand('settings-desktop', 'Desktop settings', 'Open desktop app settings', ['desktop', 'electron', '桌面', '桌面端', 'zhuomian', 'zhuomianduan', 'zm', 'zmd'], 'options', 'desktop'),
+    createSettingsCommand('settings-update-channel', 'Update channel', 'Choose the desktop app release channel', ['update channel', 'release channel', 'realeco', 'limo', 'cielo', '更新通道', '发布通道', 'gengxintongdao', 'fabutongdao', 'gxtd', 'fbtd'], 'options', 'desktop'),
+    {
+        id: 'desktop-toggle-voice-input-pause',
+        group: 'settings',
+        title: 'Voice input pause',
+        description: 'Toggle pausing playback while system voice input uses the microphone',
+        keywords: ['voice input', 'dictation', 'voice typing', 'microphone pause', '语音输入', '语音键入', '语音转文字', '麦克风', 'yuyinshuru', 'yuyinjianru', 'yuyinzhuanwenzi', 'maikefeng', 'yysr', 'yyjr', 'yyzw', 'mkf'],
+        execute: (_input, context) => {
+            context.toggleVoiceInputPause();
+            return true;
+        },
+    },
     createSettingsCommand('settings-lab', 'Lab settings', 'Open experimental settings', ['lab', 'experimental', '实验', '实验室', 'shiyan', 'shiyanshi', 'sy', 'sys'], 'options', 'lab'),
     createSettingsCommand('settings-visualizer', 'Visualizer settings', 'Open lyrics animation workbench', ['visualizer settings', 'visualizer workbench', '可视化', '歌词动画', 'keshihua', 'gecidonghua', 'ksh', 'gcdh', 'donghua'], 'options', 'visualizer'),
     createSettingsCommand('settings-theme-park', 'Color', 'Open theme editor', ['color', 'theme park', 'theme', '配色', '主题', '主题公园', 'peise', 'zhuti', 'zhutigongyuan', 'ps', 'zt', 'ztgy'], 'options', 'themePark'),
@@ -445,6 +459,7 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
     createVisualizerCommand('claddagh', 'Visualizer: Claddagh', 'Switch to Claddagh visualizer', ['visualizer claddagh', 'claddagh', '回环', 'huihuan', 'hh']),
     createVisualizerCommand('monet', 'Visualizer: Monet', 'Switch to Monet visualizer', ['visualizer monet', 'monet', '莫奈', 'monai', 'mn', '切换到可视化：莫奈', '切换到可视化莫奈']),
     createVisualizerCommand('diorama', 'Visualizer: Diorama', 'Switch to Diorama visualizer', ['visualizer diorama', 'diorama', '镜台', 'jingtai', 'jt', '切换到可视化：镜台', '切换到可视化镜台']),
+    createVisualizerCommand('pendolo', 'Visualizer: Pendolo', 'Switch to Pendolo visualizer', ['visualizer pendolo', 'pendolo', '擒纵', '摆轮', 'qinzong', 'bailun', 'pd', '切换到可视化：擒纵', '切换到可视化擒纵']),
     {
         id: 'desktop-toggle-remote-control',
         group: 'navigation',
@@ -509,6 +524,64 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
         },
     },
     {
+        id: 'background-nomand',
+        group: 'visualizer',
+        title: 'Background: Nomand',
+        description: 'Switch background to theme-colored image dithering',
+        keywords: ['nomand', 'dithering', 'dither', 'shader background', '漫游', '像素画', '像素画背景', '抖动背景', '网点背景', '主题色背景', 'man you', 'xiang su hua', 'dou dong bei jing', 'wang dian bei jing', 'my', 'xsh', 'ddbj', 'wdbj'],
+        execute: (_input, context) => {
+            context.setVisualizerBackgroundMode('nomand');
+            return true;
+        },
+    },
+    {
+        id: 'background-latent',
+        group: 'visualizer',
+        title: 'Background: Latent',
+        description: 'Switch background to cover-colored audio-reactive shaders',
+        keywords: ['latent', 'latent background', 'shader background', '隐现', '隐现背景', '音频响应背景', 'yin xian', 'yinxian', 'yxbj'],
+        execute: (_input, context) => {
+            context.setVisualizerBackgroundMode('latent');
+            return true;
+        },
+    },
+    {
+        id: 'background-latent-dithering',
+        group: 'visualizer',
+        title: 'Latent: Pixel',
+        description: 'Show only the Dithering layer in Latent background',
+        keywords: ['latent pixel', 'latent dithering', '隐现像素', '像素层', 'yinxian xiangsu', 'yxxs'],
+        execute: (_input, context) => {
+            context.setVisualizerBackgroundMode('latent');
+            context.setLatentBackgroundTuning({ displayMode: 'dithering' });
+            return true;
+        },
+    },
+    {
+        id: 'background-latent-mesh',
+        group: 'visualizer',
+        title: 'Latent: Fluid',
+        description: 'Show only the MeshGradient layer in Latent background',
+        keywords: ['latent fluid', 'latent mesh', 'mesh gradient', '隐现流体', '流体层', 'yinxian liuti', 'yxlt'],
+        execute: (_input, context) => {
+            context.setVisualizerBackgroundMode('latent');
+            context.setLatentBackgroundTuning({ displayMode: 'mesh' });
+            return true;
+        },
+    },
+    {
+        id: 'background-latent-both',
+        group: 'visualizer',
+        title: 'Latent: Mixed',
+        description: 'Show both shader layers in Latent background',
+        keywords: ['latent mixed', 'latent both', '隐现混合', '双层背景', 'yinxian hunhe', 'yxhh'],
+        execute: (_input, context) => {
+            context.setVisualizerBackgroundMode('latent');
+            context.setLatentBackgroundTuning({ displayMode: 'both' });
+            return true;
+        },
+    },
+    {
         id: 'background-url',
         group: 'visualizer',
         title: 'Background: Embedded Background',
@@ -553,6 +626,28 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
         },
     },
     {
+        id: 'settings-toggle-player-back-button',
+        group: 'settings',
+        title: 'Always show player back button',
+        description: 'Toggle whether the player page back button stays visible',
+        keywords: ['always show back button', 'player back button', 'back button', '返回按钮', '始终显示返回按钮', '播放页返回按钮', 'fanhui annniu', 'bofangye fanhui annniu', 'fh', 'bfyfh'],
+        execute: (_input, context) => {
+            context.toggleAlwaysShowPlayerBackButton();
+            return true;
+        },
+    },
+    {
+        id: 'settings-toggle-main-window-titlebar',
+        group: 'settings',
+        title: 'Always show window control buttons',
+        description: 'Toggle whether the main window control buttons stay visible',
+        keywords: ['always show window controls', 'window control buttons', 'always show titlebar', 'main window titlebar', 'titlebar', '标题栏', '控制按钮', '始终显示标题栏', '始终显示控制按钮', '主窗口标题栏', 'biaoti lan', 'zhuchuangkou biaoti lan', 'kongzhi annniu', 'bt', 'zckbt', 'kzan'],
+        execute: (_input, context) => {
+            context.toggleAlwaysShowMainWindowTitlebar();
+            return true;
+        },
+    },
+    {
         id: 'settings-toggle-bottom-subtitle-overlay',
         group: 'settings',
         title: 'Toggle bottom subtitle overlay',
@@ -586,34 +681,72 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
         },
     },
     {
-        id: 'settings-toggle-subtitle-translation',
+        id: 'settings-cycle-subtitle-content-mode',
         group: 'settings',
-        title: 'Toggle subtitle translation',
-        description: 'Show or hide translation text in visualizer subtitles',
+        title: 'Cycle subtitle content mode',
+        description: 'Switch between translation and romanization subtitle modes',
         keywords: [
             'subtitle translation',
             'translation subtitle',
             'show subtitle translation',
-            'hide subtitle translation',
             'lyrics translation',
             'caption translation',
+            'subtitle romanization',
+            'romanized lyrics',
+            'romaji',
             '字幕翻译',
             '显示翻译',
-            '隐藏翻译',
             '翻译字幕',
             '歌词翻译',
+            '切换翻译字幕',
+            '罗马音',
+            '罗马字',
+            '副字幕',
             'zimu fanyi',
             'xianshi fanyi',
-            'yincang fanyi',
             'fanyi zimu',
             'geci fanyi',
+            'luomayin',
             'zmfy',
             'xsfy',
-            'ycfy',
             'gc fy',
+            'lmy',
+            'fzm',
+            'qhfyzm',
         ],
         execute: (_input, context) => {
-            context.toggleSubtitleTranslation();
+            context.cycleSubtitleContentMode();
+            return true;
+        },
+    },
+    {
+        id: 'settings-toggle-subtitle-background',
+        group: 'settings',
+        title: 'Toggle subtitle background',
+        description: 'Show or hide the readability background behind visualizer subtitles',
+        keywords: [
+            'subtitle background',
+            'subtitle readability background',
+            'caption background',
+            'show subtitle background',
+            'hide subtitle background',
+            '字幕背景',
+            '切换字幕背景',
+            '显示字幕背景',
+            '隐藏字幕背景',
+            '字幕底色',
+            'zimu beijing',
+            'qiehuan zimu beijing',
+            'xianshi zimu beijing',
+            'yincang zimu beijing',
+            'zimu dise',
+            'zmbj',
+            'qhzmbj',
+            'xszmbj',
+            'yczmbj',
+        ],
+        execute: (_input, context) => {
+            context.toggleSubtitleOverlayBackground();
             return true;
         },
     },
@@ -649,7 +782,7 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
 ];
 
 export const getAvailableCommandPaletteCommands = (context?: CommandPaletteContext) => COMMAND_PALETTE_COMMANDS.filter(command => {
-    if (command.id === 'settings-desktop' || command.id.startsWith('desktop-')) {
+    if (command.id === 'settings-desktop' || command.id === 'settings-update-channel' || command.id.startsWith('desktop-')) {
         const isWebBrowser = typeof window !== 'undefined';
         const isElectron = isWebBrowser && Boolean((window as any).electron);
         if (isWebBrowser && !isElectron) {
@@ -657,8 +790,11 @@ export const getAvailableCommandPaletteCommands = (context?: CommandPaletteConte
         }
     }
 
-    if (command.id === 'playback-auto-match-best-lyric') {
-        return Boolean(context?.enableAlternativeLyricSources);
+    if (command.id === 'desktop-toggle-voice-input-pause') {
+        const isElectron = typeof window !== 'undefined' && Boolean((window as any).electron);
+        if (!isElectron || !context?.voiceInputPauseSupported) {
+            return false;
+        }
     }
 
     if (command.id === 'theme-generate-current') {
@@ -738,7 +874,7 @@ export const getCommandPaletteMatches = (
     if (!normalizedQuery) {
         const recentCommands = recentCommandIds
             .map(commandId => filteredCommands.find(command => command.id === commandId))
-            .filter((command): command is CommandPaletteCommand => Boolean(command) && !command.requiresInput);
+            .filter((command): command is CommandPaletteCommand => command !== undefined && !command.requiresInput);
         const recentCommandIdSet = new Set(recentCommands.map(command => command.id));
         const defaultCommands = filteredCommands.filter(command => !recentCommandIdSet.has(command.id));
 

@@ -11,22 +11,21 @@ import {
     type DioramaTuning,
     type FumeTuning,
     type Line,
-    type MonetBackgroundImage,
-    type MonetBackgroundTuning,
     type MonetPortraitImage,
     type MonetTuning,
     type PartitaTuning,
+    type PendoloTuning,
+    type SubtitleContentMode,
     type Theme,
     type TiltTuning,
-    type UrlBackgroundItem,
-    type VisualizerBackgroundMode,
     type VisualizerMode,
 } from '../../types';
 import type { VisualizerTuningBundle } from './tuningRegistry';
+import type { VisualizerBackgroundConfig } from './backgrounds/definition';
 
 // src/components/visualizer/definition.ts
 // Shared contracts for discoverable visualizer modes.
-export type VisualizerTuningKind = 'none' | 'classic' | 'cadenza' | 'partita' | 'fume' | 'claddagh' | 'cappella' | 'tilt' | 'monet' | 'diorama';
+export type VisualizerTuningKind = 'none' | 'classic' | 'cadenza' | 'partita' | 'fume' | 'claddagh' | 'cappella' | 'tilt' | 'monet' | 'diorama' | 'pendolo';
 
 export interface VisualizerSharedProps {
     currentTime: MotionValue<number>;
@@ -42,23 +41,24 @@ export interface VisualizerSharedProps {
     songArtist?: string | null;
     songAlbum?: string | null;
     coverUrl?: string | null;
-    useCoverColorBg?: boolean;
     seed?: string | number;
     staticMode?: boolean;
-    backgroundOpacity?: number;
+    backgroundStaticMode?: boolean;
     visualizerOpacity?: number;
-    transparentBackground?: boolean;
-    disableGeometricBackground?: boolean;
-    disableVignette?: boolean;
+    background?: VisualizerBackgroundConfig;
     lyricsFontScale?: number;
+    subtitleFontScale?: number;
     subtitleOverlayOpacity?: number;
-    visualizerBackgroundMode?: VisualizerBackgroundMode | null;
-    resolvedVisualizerBackgroundMode?: VisualizerBackgroundMode;
+    subtitleOverlayBackground?: boolean;
+    showHarmonySubtitle?: boolean;
+    harmonySubtitleBackground?: boolean;
     isPlayerChromeHidden?: boolean;
     hideTranslationSubtitle?: boolean;
     showSubtitleTranslation?: boolean;
+    subtitleContentMode?: SubtitleContentMode;
     paused?: boolean;
     onBack?: () => void;
+    alwaysShowBackButton?: boolean;
     onLyricLineSeek?: (lyricTimeSec: number) => void;
     isPreviewMode?: boolean;
     visualizerTunings?: VisualizerTuningBundle;
@@ -73,13 +73,11 @@ export interface VisualizerSharedProps {
     cappellaCustomAvatarImages?: CappellaAvatarImage[];
     tiltTuning?: TiltTuning;
     dioramaTuning?: DioramaTuning;
-    monetBackgroundTuning?: MonetBackgroundTuning;
     monetTuning?: MonetTuning;
-    monetBackgroundImage?: MonetBackgroundImage | null;
     monetPortraitImage?: MonetPortraitImage | null;
-    urlBackgroundList?: UrlBackgroundItem[];
-    urlBackgroundSelectedId?: string | null;
     onMonetTuningChange?: (patch: Partial<MonetTuning>) => void;
+    pendoloTuning?: PendoloTuning;
+    onPendoloTuningChange?: (patch: Partial<PendoloTuning>) => void;
 }
 
 export interface VisualizerSettingsPanelProps {
@@ -115,22 +113,12 @@ export interface VisualizerSettingsPanelProps {
     onDioramaTuningChange?: (patch: Partial<DioramaTuning>) => void;
     monetTuning?: MonetTuning;
     onMonetTuningChange?: (patch: Partial<MonetTuning>) => void;
-    monetBackgroundImage?: MonetBackgroundImage | null;
-    monetBackgroundTuning?: MonetBackgroundTuning;
-    onMonetBackgroundTuningChange?: (patch: Partial<MonetBackgroundTuning>) => void;
-    onUploadMonetBackgroundImage?: (files: File[]) => Promise<{ ok: boolean; error?: string; }>;
-    onClearMonetBackgroundImage?: () => Promise<void> | void;
-    isLoadingMonetBackgroundImage?: boolean;
     monetPortraitImage?: MonetPortraitImage | null;
     onUploadMonetPortraitImage?: (files: File[]) => Promise<{ ok: boolean; error?: string; }>;
     onClearMonetPortraitImage?: () => Promise<void> | void;
     isLoadingMonetPortraitImage?: boolean;
-    urlBackgroundList?: UrlBackgroundItem[];
-    urlBackgroundSelectedId?: string | null;
-    onAddUrlBackgroundItem?: (item: UrlBackgroundItem) => void;
-    onUpdateUrlBackgroundItem?: (id: string, patch: Partial<Omit<UrlBackgroundItem, 'id'>>) => void;
-    onDeleteUrlBackgroundItem?: (id: string) => void;
-    onSetUrlBackgroundSelectedId?: (id: string | null) => void;
+    pendoloTuning?: PendoloTuning;
+    onPendoloTuningChange?: (patch: Partial<PendoloTuning>) => void;
     /** Mark slider drag start so onChange only updates draft. */
     onSliderPointerDown?: () => void;
     /** Commit draft values to persistent store on slider release. */
@@ -146,8 +134,10 @@ export interface VisualizerSettingsResetProps {
     resetTiltTuning?: () => void;
     resetDioramaTuning?: () => void;
     resetMonetTuning?: () => void;
+    resetPendoloTuning?: () => void;
     setDraftFumeTuning?: (tuning: FumeTuning) => void;
     setDraftCladdaghTuning?: (tuning: CladdaghTuning) => void;
+    setDraftPendoloTuning?: (tuning: PendoloTuning) => void;
 }
 
 export interface VisualizerRegistryEntry {

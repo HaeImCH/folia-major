@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useMotionValueEvent, type MotionValue } from '
 import { useTranslation } from 'react-i18next';
 import { layoutWithLines, prepareWithSegments, type PrepareOptions } from '@chenglou/pretext';
 import { DEFAULT_CAPPELLA_TUNING, type AudioBands, type CappellaEmojiImage, type CappellaTuning, type Line, type Theme } from '../../../types';
-import { resolveThemeFontStack } from '../../../utils/fontStacks';
+import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fontStacks';
 import { buildLineGraphemeTimeline, buildWordGraphemeTimings, splitLyricGraphemes } from '../../../utils/lyrics/graphemeTiming';
 import { getLineRenderEndTime, getLineRenderHints } from '../../../utils/lyrics/renderHints';
 import { mixColors } from '../colorMix';
@@ -76,12 +76,7 @@ const CAPPELLA_LAYOUT_CACHE_LIMIT = 32;
 // 让横向扩展先于字符出现启动，避免临界换行时字符短暂掉到下一行。
 const CAPPELLA_WIDTH_LOOKAHEAD_SECONDS = 0.2;
 const CAPPELLA_BUBBLE_TEXT_OPTIONS = { whiteSpace: 'pre-wrap' } satisfies PrepareOptions;
-// ActiveCappellaText 渲染时把每个字拆成独立的 inline-block 放进 flex-wrap 行，
-// 失去字距且每字宽度各自向上取整，所以 DOM 实际行宽比下面 canvas 连续文本的量度略大。
-// 差值足以令「量度为一行」的歌词在渲染时把最后一个字挤到第二行，而气泡高度只按量度
-// 的行数预留，第二行便被 overflow:hidden 裁掉半个字（QRC 全角日文/中文尤其明显）。
-// 预留一点横向安全余量，让渲染行始终容得下其高度所对应的宽度。
-const cappellaBubbleRenderSafetyPx = (fontSize: number) => Math.max(6, Math.ceil(fontSize * 0.35));
+const CAPPELLA_BUBBLE_FONT_WEIGHT = 400;
 
 interface BubbleSize {
     width: number;
@@ -366,29 +361,34 @@ const buildCappellaMessages = (
         const isShortLine = countCompactChars(line.fullText) <= SHORT_LINE_CHAR_LIMIT;
         const agentSender = agentSenderResolver?.resolve(line) ?? null;
         const shouldForceRight = !agentSender && (lineIndex + 1) % config.sequencing.forceRightEveryLines === 0;
-        const shouldCarrySender = !agentSender
+        const shouldCarrySender = Boolean(!agentSender
             && isShortLine
             && lastLyricSender
-            && seededUnit('carry', line.startTime, lineIndex) <= config.sequencing.shortLineCarryChance;
+            && seededUnit('carry', line.startTime, lineIndex) <= config.sequencing.shortLineCarryChance);
         const baseSide = config.sequencing.sideSequence[sideSequenceCursor % config.sequencing.sideSequence.length];
         const shouldFlipSide = !shouldForceRight
             && seededUnit('flip', line.startTime, lineIndex) < config.sequencing.sideFlipChance;
         const resolvedSide = shouldFlipSide
             ? (baseSide === 'left' ? 'right' : 'left')
             : baseSide;
-        const sender = agentSender ?? (shouldForceRight
-            ? {
+        let sender: CappellaMessageSender;
+        if (agentSender) {
+            sender = agentSender;
+        } else if (shouldForceRight) {
+            sender = {
                 side: 'right' as const,
                 avatarIndex: RIGHT_AVATAR_INDEX,
-            }
-            : shouldCarrySender
-                ? lastLyricSender
-                : {
-                    side: resolvedSide,
-                    avatarIndex: resolvedSide === 'left'
-                        ? nextLeftAvatarCursor
-                        : RIGHT_AVATAR_INDEX,
-                });
+            };
+        } else if (shouldCarrySender && lastLyricSender) {
+            sender = lastLyricSender;
+        } else {
+            sender = {
+                side: resolvedSide,
+                avatarIndex: resolvedSide === 'left'
+                    ? nextLeftAvatarCursor
+                    : RIGHT_AVATAR_INDEX,
+            };
+        }
 
         const isInterlude = line.fullText === INTERLUDE_TEXT;
         const emoImage = isInterlude && showEmoMessages
@@ -842,7 +842,7 @@ const measureBubbleText = ({
     const safeText = text || ' ';
     const prepared = prepareWithSegments(
         safeText,
-        `640 ${fontSize}px ${resolveThemeFontStack(theme)}`,
+        `${resolveThemeFontWeight(theme, CAPPELLA_BUBBLE_FONT_WEIGHT)} ${fontSize}px ${resolveThemeFontStack(theme)}`,
         CAPPELLA_BUBBLE_TEXT_OPTIONS
     );
     const layout = layoutWithLines(prepared, Math.max(1, maxTextWidth), Math.round(lineHeightPx));
@@ -852,7 +852,6 @@ const measureBubbleText = ({
     return {
         width: Math.ceil(
             Math.min(textWidth, maxTextWidth)
-            + cappellaBubbleRenderSafetyPx(fontSize)
             + paddingX * 2
             + bubbleBorderWidth * 2
         ),
@@ -881,6 +880,8 @@ const getBubbleMetricsCacheKey = ({
     line.endTime,
     line.words.length,
     theme.name,
+    resolveThemeFontStack(theme),
+    resolveThemeFontWeight(theme, CAPPELLA_BUBBLE_FONT_WEIGHT),
     fontSize.toFixed(3),
     lineHeightPx.toFixed(3),
     maxTextWidth,
@@ -1094,13 +1095,12 @@ const ActiveCappellaText: React.FC<{
     const visibleFadeDurations = revealPlan.fadeDurationsMs.slice(0, Math.max(0, visibleCharacterCount));
 
     return (
-        <span className="inline-flex flex-wrap items-baseline">
+        // 保持普通 inline 文本流，使 DOM 的字形塑形和换行规则与 pretext 的连续文本量度一致。
+        <span>
             {visibleCharacters.map((character, index) => (
                 <span
                     key={`${index}-${character}`}
-                    className="inline-block"
                     style={{
-                        whiteSpace: character.trim() ? 'pre' : 'pre-wrap',
                         animationName: 'cappella-char-fade',
                         animationDuration: `${visibleFadeDurations[index] ?? DEFAULT_CHAR_FADE_MS}ms`,
                         animationTimingFunction: 'ease-out',
@@ -1437,8 +1437,9 @@ const CappellaMessageRow = React.forwardRef<HTMLDivElement, CappellaMessageRowPr
                                 border: `1px solid ${bubbleColors.borderColor}`,
                                 color: bubbleColors.textColor,
                                 fontSize: bubbleFontSize,
+                                fontWeight: resolveThemeFontWeight(theme, CAPPELLA_BUBBLE_FONT_WEIGHT),
                                 lineHeight: 1.45,
-                                maxWidth: maxTextWidth + bubblePaddingX * 2 + cappellaBubbleRenderSafetyPx(bubbleFontSize) + 2,
+                                maxWidth: maxTextWidth + bubblePaddingX * 2 + 2,
                                 minHeight: Math.max(
                                     isActiveMessage ? motionConfig.activeMinHeight : motionConfig.inactiveMinHeight,
                                     bubbleFontSize * 1.45 + bubblePaddingY * 2
@@ -1490,10 +1491,13 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
         coverUrl,
         seed,
         lyricsFontScale = 1,
+        subtitleFontScale = 1,
         subtitleOverlayOpacity,
+        subtitleOverlayBackground,
         isPlayerChromeHidden = false,
         hideTranslationSubtitle = false,
         showSubtitleTranslation = true,
+        subtitleContentMode,
         cappellaTuning = DEFAULT_CAPPELLA_TUNING,
         cappellaCustomEmojiImages = [],
         cappellaCustomAvatarImages = [],
@@ -1663,9 +1667,12 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
                 translationFontSize={`${Math.max(14, 16 * lyricsFontScale)}px`}
                 upcomingFontSize={`${Math.max(12, 14 * lyricsFontScale)}px`}
                 subtitleOverlayOpacity={subtitleOverlayOpacity}
+                subtitleOverlayBackground={subtitleOverlayBackground}
+                subtitleFontScale={subtitleFontScale}
                 isPlayerChromeHidden={isPlayerChromeHidden}
                 hideTranslationSubtitle={hideTranslationSubtitle}
                 showSubtitleTranslation={showSubtitleTranslation}
+                subtitleContentMode={subtitleContentMode}
             />
         </VisualizerShell>
     );

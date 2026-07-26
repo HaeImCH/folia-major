@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import type React from 'react';
 import type { MotionValue } from 'framer-motion';
-import { neteaseApi } from '../services/netease';
+import { omni } from '../services/onlineMusic/omni';
 import { PlayerState } from '../types';
 import type { ReplayGainMode, SongResult, StageLoopMode, StatusMessage } from '../types';
 import { getReplayGainModeLabel } from '../utils/appPlaybackHelpers';
@@ -117,7 +117,6 @@ export function usePlaybackInteractionBridge({
             return;
         }
 
-
         if (isSpotifyStageActive) {
             void toggleSpotifyLoop();
             return;
@@ -144,7 +143,7 @@ export function usePlaybackInteractionBridge({
 
         if (currentSong && isFmMode) {
             try {
-                await neteaseApi.fmTrash(currentSong.id);
+                await omni.dislikeSong(currentSong);
             } catch (error) {
                 void error;
             }

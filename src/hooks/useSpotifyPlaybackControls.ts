@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MotionValue } from 'framer-motion';
 import { PlayerState } from '../types';
@@ -43,10 +43,22 @@ export function useSpotifyPlaybackControls({
     getNowPlayingDisplayTime,
     t,
 }: UseSpotifyPlaybackControlsParams) {
+    const activeRef = useRef(active);
+    const controlRequestIdRef = useRef(0);
+
+    useLayoutEffect(() => {
+        activeRef.current = active;
+        controlRequestIdRef.current += 1;
+    }, [active]);
+
     const requestControl = useCallback(async (command: ElectronSpotifyPlaybackControlCommand) => {
-        if (!active) {
+        if (!activeRef.current) {
             return false;
         }
+
+        const requestId = controlRequestIdRef.current + 1;
+        controlRequestIdRef.current = requestId;
+        const isCurrentRequest = () => activeRef.current && controlRequestIdRef.current === requestId;
 
         try {
             const bridge = window.electron?.controlSpotifyPlayback;
@@ -54,12 +66,18 @@ export function useSpotifyPlaybackControls({
                 throw new Error('Spotify playback controls are unavailable in this build.');
             }
             const response = await bridge(command);
+            if (!isCurrentRequest()) {
+                return false;
+            }
             if (!response.ok) {
                 throw new Error(response.error || 'Spotify rejected the playback command.');
             }
             window.dispatchEvent(new Event(SPOTIFY_PLAYBACK_REFRESH_EVENT));
             return true;
         } catch (error) {
+            if (!isCurrentRequest()) {
+                return false;
+            }
             const message = error instanceof Error ? error.message : String(error);
             setStatusMsg({
                 type: 'error',
@@ -68,7 +86,7 @@ export function useSpotifyPlaybackControls({
             });
             return false;
         }
-    }, [active, setStatusMsg, t]);
+    }, [setStatusMsg, t]);
 
     const resumeSpotify = useCallback(async () => {
         if (await requestControl({ action: 'resume' })) {

@@ -2,13 +2,23 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it, vi } from 'vitest';
-import { PlayerState } from '@/types';
+import { PlayerState, type Theme } from '@/types';
 import { buildHomeModel } from '@/components/app/home/buildHomeModel';
 
 // test/unit/navigation/homeStageEntry.test.ts
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(currentDir, '../../..');
+
+const theme: Theme = {
+    name: 'Test',
+    backgroundColor: '#000',
+    primaryColor: '#fff',
+    secondaryColor: '#999',
+    accentColor: '#fff',
+    fontStyle: 'sans',
+    animationIntensity: 'normal',
+};
 
 const readRepoFile = async (relativePath: string) => {
     return readFile(path.join(repoRoot, relativePath), 'utf8');
@@ -20,7 +30,7 @@ const createBaseParams = () => {
     return {
         playSong: vi.fn(),
         navigateToPlayer: vi.fn(),
-        refreshUserData: vi.fn().mockResolvedValue(undefined),
+        refreshOnlineProviderPlaylists: vi.fn().mockResolvedValue(undefined),
         user: null,
         playlists: [],
         cloudPlaylist: undefined,
@@ -40,6 +50,12 @@ const createBaseParams = () => {
         openLocalAlbumByName: vi.fn(),
         openLocalArtistByName: vi.fn(),
         localSongs: [],
+        localLibraryCatalog: {
+            entities: [],
+            assignments: [],
+            ready: true,
+            reload: vi.fn().mockResolvedValue(undefined),
+        },
         localPlaylists: [],
         onRefreshLocalSongs: vi.fn(),
         onPlayLocalSong: vi.fn(),
@@ -63,11 +79,14 @@ const createBaseParams = () => {
         clearStagePlaybackSession: vi.fn(),
         clearPersistedStagePlaybackCache: vi.fn().mockResolvedValue(undefined),
         loadStageSessionIntoPlayback: vi.fn().mockResolvedValue(undefined),
-        theme: null,
+        theme,
         navidromeEnabled: false,
         playAll: vi.fn(),
         addAllToQueue: vi.fn(),
         addSongToQueue: vi.fn(),
+        onOpenCollection: vi.fn(),
+        onPushCollection: vi.fn(),
+        onBackCollection: vi.fn(),
     };
 };
 
@@ -76,11 +95,11 @@ describe('home stage entry wiring', () => {
         const params = createBaseParams();
         const model = buildHomeModel(params);
 
-        expect(model.legacyProps.stageEnabled).toBe(true);
-        expect(model.legacyProps.stageSource).toBe('stage-api');
-        expect(model.legacyProps.stageIsActive).toBe(true);
+        expect(model.surfaceProps.stageEnabled).toBe(true);
+        expect(model.surfaceProps.stageSource).toBe('stage-api');
+        expect(model.surfaceProps.stageIsActive).toBe(true);
 
-        await model.legacyProps.onOpenStagePlayer?.();
+        await model.surfaceProps.onOpenStagePlayer?.();
         expect(params.openStagePlayer).toHaveBeenCalledTimes(1);
     });
 
@@ -92,9 +111,9 @@ describe('home stage entry wiring', () => {
             activePlaybackContext: 'main',
         });
 
-        expect(model.legacyProps.stageEnabled).toBe(false);
-        expect(model.legacyProps.stageSource).toBeUndefined();
-        expect(model.legacyProps.stageIsActive).toBe(false);
+        expect(model.surfaceProps.stageEnabled).toBe(false);
+        expect(model.surfaceProps.stageSource).toBeUndefined();
+        expect(model.surfaceProps.stageIsActive).toBe(false);
     });
 });
 
@@ -103,7 +122,7 @@ describe('home stage entry source contracts', () => {
         const content = await readRepoFile('src/components/app/Home.tsx');
 
         expect(content).toContain('<Grid3D');
-        expect(content).toContain('{...model.legacyProps}');
+        expect(content).toContain('{...model.surfaceProps}');
         expect(content).toContain('onOpenGridView={openGridView}');
     });
 

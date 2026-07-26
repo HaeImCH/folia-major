@@ -1,5 +1,5 @@
 import type { ConverterFunction } from 'opencc-js/core';
-import type { LyricAlternateText, LyricData, LyricSyllable, Word } from '../../types';
+import type { LyricAlternateText, LyricBackgroundVocal, LyricData, LyricSyllable, Word } from '../../types';
 
 // src/utils/lyrics/traditionalChinese.ts
 // Converts displayed lyric text to Taiwan Traditional Chinese without changing timing metadata.
@@ -49,6 +49,17 @@ const convertAlternateTexts = (alternateTexts: LyricAlternateText[] | undefined,
     })
 );
 
+const convertBackgroundVocal = (
+    vocal: LyricBackgroundVocal,
+    convertToTraditional: ConverterFunction,
+): LyricBackgroundVocal => ({
+    ...vocal,
+    text: convertToTraditional(vocal.text),
+    translation: vocal.translation ? convertToTraditional(vocal.translation) : vocal.translation,
+    words: convertWords(vocal.words, convertToTraditional),
+    alternateTexts: convertAlternateTexts(vocal.alternateTexts, convertToTraditional),
+});
+
 export const convertLyricDataToTraditional = async (lyrics: LyricData | null): Promise<LyricData | null> => {
     if (!lyrics) {
         return null;
@@ -66,15 +77,12 @@ export const convertLyricDataToTraditional = async (lyrics: LyricData | null): P
             translation: line.translation ? convertToTraditional(line.translation) : line.translation,
             words: convertWords(line.words, convertToTraditional),
             alternateTexts: convertAlternateTexts(line.alternateTexts, convertToTraditional),
-            backgroundVocal: line.backgroundVocal ? {
-                ...line.backgroundVocal,
-                text: convertToTraditional(line.backgroundVocal.text),
-                translation: line.backgroundVocal.translation
-                    ? convertToTraditional(line.backgroundVocal.translation)
-                    : line.backgroundVocal.translation,
-                words: convertWords(line.backgroundVocal.words, convertToTraditional),
-                alternateTexts: convertAlternateTexts(line.backgroundVocal.alternateTexts, convertToTraditional),
-            } : line.backgroundVocal,
+            backgroundVocal: line.backgroundVocal
+                ? convertBackgroundVocal(line.backgroundVocal, convertToTraditional)
+                : line.backgroundVocal,
+            backgroundVocals: line.backgroundVocals?.map(vocal => (
+                convertBackgroundVocal(vocal, convertToTraditional)
+            )),
         })),
         ttml: lyrics.ttml ? {
             ...lyrics.ttml,

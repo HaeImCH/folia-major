@@ -10,7 +10,7 @@ const baseSong: SongResult = {
     name: ' Bad   Apple ',
     artists: [{ id: 1, name: 'Nomico' }],
     album: { id: 2, name: 'Lovelight' },
-    duration: 219321,
+    durationMs: 219321,
 };
 
 describe('sync fingerprint', () => {
@@ -22,22 +22,13 @@ describe('sync fingerprint', () => {
         const localSong: UnifiedSong = {
             ...baseSong,
             isLocal: true,
-            localData: {
-                id: 'local-1',
-                fileName: 'bad apple.flac',
-                filePath: '/music/bad apple.flac',
-                duration: 219321,
-                fileSize: 1,
-                mimeType: 'audio/flac',
-                addedAt: 1,
-                title: 'Bad Apple',
-                artist: 'Nomico',
-                album: 'Lovelight',
-            },
+            localRef: { songId: 'local-1' },
+            sourceRef: { kind: 'local', mediaId: 'local-1' },
         };
         const navidromeSong: UnifiedSong = {
             ...baseSong,
             isNavidrome: true,
+            sourceRef: { kind: 'navidrome', mediaId: 'navidrome-1' },
             navidromeData: {
                 title: 'Bad Apple',
                 artist: 'Nomico',

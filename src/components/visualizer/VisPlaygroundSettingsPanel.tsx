@@ -1,31 +1,34 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CaptionsOff, Languages, Monitor, RotateCcw, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, CaptionsOff, Monitor, PanelTop, RotateCcw, type LucideIcon } from 'lucide-react';
 import {
-    DEFAULT_MONET_BACKGROUND_TUNING,
     type CappellaAvatarImage,
     type CappellaEmojiImage,
     type CappellaTuning,
     type ClassicTuning,
     type CladdaghTuning,
     type FumeTuning,
-    type MonetBackgroundImage,
-    type MonetBackgroundTuning,
     type MonetPortraitImage,
     type MonetTuning,
     type PartitaTuning,
+    type PendoloTuning,
     type Theme,
+    type SubtitleContentMode,
     type TiltTuning,
     type DioramaTuning,
-    type UrlBackgroundItem,
-    type VisualizerBackgroundMode,
     type VisualizerMode,
 } from '../../types';
+import { useSettingsUiStore } from '../../stores/useSettingsUiStore';
 import { colorWithAlpha } from './colorMix';
-import { MonetBackgroundSettingsCard } from './MonetBackgroundSettingsCard';
-import { UrlBackgroundSettingsCard } from './backgrounds/UrlBackgroundSettingsCard';
 import FontFallbackStackControl from './FontFallbackStackControl';
 import { VISUALIZER_REGISTRY, getVisualizerModeLabel, type VisualizerRegistryEntry } from './registry';
 import { type VisPlaygroundEditSection } from './VisPlaygroundPreviewHotspots';
+import type { VisualizerBackgroundActions, VisualizerBackgroundConfig } from './backgrounds/definition';
+import {
+    DEFAULT_VISUALIZER_BACKGROUND_MODE,
+    getVisualizerBackgroundModeLabel,
+    getVisualizerBackgroundRegistryEntry,
+    VISUALIZER_BACKGROUND_REGISTRY,
+} from './backgrounds/registry';
 
 // src/components/visualizer/VisPlaygroundSettingsPanel.tsx
 // Right-side settings panel for the click-to-edit visualizer playground.
@@ -65,19 +68,10 @@ interface VisPlaygroundSettingsPanelProps {
     onResetVisualizerTuning?: () => void;
     controlCardBg: string;
     rangeInputClass: string;
-    backgroundOpacity: number;
-    onBackgroundOpacityChange?: (opacity: number) => void;
     visualizerOpacity: number;
     onVisualizerOpacityChange?: (opacity: number) => void;
-    useCoverColorBg: boolean;
-    onToggleCoverColorBg?: (enabled: boolean) => void;
-    disableVisualizerVignette: boolean;
-    onToggleDisableVisualizerVignette?: (disabled: boolean) => void;
-    disableVisualizerGeometricBackground: boolean;
-    onToggleDisableVisualizerGeometricBackground?: (disabled: boolean) => void;
-    visualizerBackgroundMode?: VisualizerBackgroundMode | null;
-    onVisualizerBackgroundModeChange?: (mode: VisualizerBackgroundMode) => void;
-    onResetBackgroundSettings?: () => void;
+    backgroundConfig?: VisualizerBackgroundConfig;
+    backgroundActions?: VisualizerBackgroundActions;
     fontStyleValue: Theme['fontStyle'] | 'custom';
     builtinFontOptions: PresetOption<Theme['fontStyle']>[];
     fontStyleOptions: PresetOption<Theme['fontStyle'] | 'custom'>[];
@@ -86,6 +80,12 @@ interface VisPlaygroundSettingsPanelProps {
     fontScale: number;
     fontScaleOptions: PresetOption<number>[];
     onFontScaleChange: (fontScale: number) => void;
+    subtitleFontScale: number;
+    onSubtitleFontScaleChange: (fontScale: number) => void;
+    fontWeight: number | null;
+    fontWeightOptions: PresetOption<number>[];
+    onFontWeightChange: (fontWeight: number | null) => void;
+    onFontWeightFollowChange: (follow: boolean) => void;
     onResetCommonSettings?: () => void;
     classicTuning: ClassicTuning;
     onClassicTuningChange?: (patch: Partial<ClassicTuning>) => void;
@@ -95,6 +95,8 @@ interface VisPlaygroundSettingsPanelProps {
     onFumeTuningChange?: (patch: Partial<FumeTuning>) => void;
     claddaghTuning: CladdaghTuning;
     onCladdaghTuningChange?: (patch: Partial<CladdaghTuning>) => void;
+    pendoloTuning?: PendoloTuning;
+    onPendoloTuningChange?: (patch: Partial<PendoloTuning>) => void;
     cappellaTuning: CappellaTuning;
     cappellaCustomEmojiImages: CappellaEmojiImage[];
     onCappellaTuningChange?: (patch: Partial<CappellaTuning>) => void;
@@ -109,35 +111,33 @@ interface VisPlaygroundSettingsPanelProps {
     onTiltTuningChange?: (patch: Partial<TiltTuning>) => void;
     dioramaTuning?: DioramaTuning;
     onDioramaTuningChange?: (patch: Partial<DioramaTuning>) => void;
-    monetBackgroundTuning?: MonetBackgroundTuning;
-    onMonetBackgroundTuningChange?: (patch: Partial<MonetBackgroundTuning>) => void;
     monetTuning: MonetTuning;
     onMonetTuningChange?: (patch: Partial<MonetTuning>) => void;
     onResetMonetTuning?: () => void;
-    monetBackgroundImage?: MonetBackgroundImage | null;
-    onUploadMonetBackgroundImage?: (files: File[]) => Promise<{ ok: boolean; error?: string; }>;
-    onClearMonetBackgroundImage?: () => Promise<void> | void;
-    isLoadingMonetBackgroundImage?: boolean;
     monetPortraitImage?: MonetPortraitImage | null;
     onUploadMonetPortraitImage?: (files: File[]) => Promise<{ ok: boolean; error?: string; }>;
     onClearMonetPortraitImage?: () => Promise<void> | void;
     isLoadingMonetPortraitImage?: boolean;
-    urlBackgroundList?: UrlBackgroundItem[];
-    urlBackgroundSelectedId?: string | null;
-    onAddUrlBackgroundItem?: (item: UrlBackgroundItem) => void;
-    onUpdateUrlBackgroundItem?: (id: string, patch: Partial<Omit<UrlBackgroundItem, 'id'>>) => void;
-    onDeleteUrlBackgroundItem?: (id: string) => void;
-    onSetUrlBackgroundSelectedId?: (id: string | null) => void;
     hideTranslationSubtitle: boolean;
     onToggleHideTranslationSubtitle?: (hidden: boolean) => void;
-    showSubtitleTranslation: boolean;
     onToggleShowSubtitleTranslation?: (shown: boolean) => void;
+    subtitleContentMode: SubtitleContentMode;
+    onSubtitleContentModeChange?: (mode: SubtitleContentMode) => void;
     subtitleOverlayOpacity: number;
     onSubtitleOverlayOpacityChange?: (opacity: number) => void;
+    subtitleOverlayBackground: boolean;
+    onToggleSubtitleOverlayBackground?: (enabled: boolean) => void;
+    showHarmonySubtitle: boolean;
+    onToggleShowHarmonySubtitle?: (enabled: boolean) => void;
+    harmonySubtitleBackground: boolean;
+    onToggleHarmonySubtitleBackground?: (enabled: boolean) => void;
     subtitleFontInheritsLyrics: boolean;
     onSubtitleFontInheritsLyricsChange?: (inheritsLyrics: boolean) => void;
     subtitleFontStyle: Theme['fontStyle'];
+    subtitleFontWeight: number | null;
     onSubtitleFontStyleChange?: (fontStyle: Theme['fontStyle']) => void;
+    onSubtitleFontWeightChange?: (fontWeight: number | null) => void;
+    onSubtitleFontWeightFollowChange?: (follow: boolean) => void;
     subtitleFontFamily?: string | null;
     onSubtitleFontFamilyChange?: (fontFamily: string | null) => void;
     subtitleFontFallbackFamilies: string[];
@@ -228,6 +228,7 @@ const ToggleRow: React.FC<ToggleRowProps> = ({
         </div>
         <button
             type="button"
+            aria-label={label}
             aria-pressed={checked}
             onClick={() => onChange?.(!checked)}
             className="w-12 h-6 rounded-full p-1 transition-colors shrink-0 disabled:opacity-45"
@@ -306,19 +307,10 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
         onResetVisualizerTuning,
         controlCardBg,
         rangeInputClass,
-        backgroundOpacity,
-        onBackgroundOpacityChange,
         visualizerOpacity,
         onVisualizerOpacityChange,
-        useCoverColorBg,
-        onToggleCoverColorBg,
-        disableVisualizerVignette,
-        onToggleDisableVisualizerVignette,
-        disableVisualizerGeometricBackground,
-        onToggleDisableVisualizerGeometricBackground,
-        visualizerBackgroundMode,
-        onVisualizerBackgroundModeChange,
-        onResetBackgroundSettings,
+        backgroundConfig,
+        backgroundActions,
         fontStyleValue,
         builtinFontOptions,
         fontStyleOptions,
@@ -327,6 +319,12 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
         fontScale,
         fontScaleOptions,
         onFontScaleChange,
+        subtitleFontScale,
+        onSubtitleFontScaleChange,
+        fontWeight,
+        fontWeightOptions,
+        onFontWeightChange,
+        onFontWeightFollowChange,
         onResetCommonSettings,
         classicTuning,
         onClassicTuningChange,
@@ -350,33 +348,33 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
         onTiltTuningChange,
         dioramaTuning,
         onDioramaTuningChange,
-        monetBackgroundTuning = DEFAULT_MONET_BACKGROUND_TUNING,
-        onMonetBackgroundTuningChange,
         monetTuning,
         onMonetTuningChange,
-        monetBackgroundImage,
-        onUploadMonetBackgroundImage,
-        onClearMonetBackgroundImage,
-        isLoadingMonetBackgroundImage,
+        pendoloTuning,
+        onPendoloTuningChange,
         monetPortraitImage,
         onUploadMonetPortraitImage,
         onClearMonetPortraitImage,
         isLoadingMonetPortraitImage,
-        urlBackgroundList = [],
-        urlBackgroundSelectedId = null,
-        onAddUrlBackgroundItem,
-        onUpdateUrlBackgroundItem,
-        onDeleteUrlBackgroundItem,
-        onSetUrlBackgroundSelectedId,
         hideTranslationSubtitle,
         onToggleHideTranslationSubtitle,
-        showSubtitleTranslation,
         onToggleShowSubtitleTranslation,
+        subtitleContentMode,
+        onSubtitleContentModeChange,
         subtitleOverlayOpacity,
         onSubtitleOverlayOpacityChange,
+        subtitleOverlayBackground,
+        onToggleSubtitleOverlayBackground,
+        showHarmonySubtitle,
+        onToggleShowHarmonySubtitle,
+        harmonySubtitleBackground,
+        onToggleHarmonySubtitleBackground,
         subtitleFontInheritsLyrics,
         onSubtitleFontInheritsLyricsChange,
         subtitleFontStyle,
+        subtitleFontWeight,
+        onSubtitleFontWeightChange,
+        onSubtitleFontWeightFollowChange,
         onSubtitleFontStyleChange,
         subtitleFontFamily,
         onSubtitleFontFamilyChange,
@@ -387,6 +385,15 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
         onSliderPointerDown,
         onSliderCommit,
     } = props;
+    const [fontWeightSliderValue, setFontWeightSliderValue] = useState(fontWeight ?? 400);
+    const [subtitleFontWeightSliderValue, setSubtitleFontWeightSliderValue] = useState(subtitleFontWeight ?? 400);
+
+    useEffect(() => {
+        if (fontWeight !== null) setFontWeightSliderValue(fontWeight);
+    }, [fontWeight]);
+    useEffect(() => {
+        if (subtitleFontWeight !== null) setSubtitleFontWeightSliderValue(subtitleFontWeight);
+    }, [subtitleFontWeight]);
 
     const modeOptions = useMemo(() => (
         VISUALIZER_REGISTRY.map(entry => ({
@@ -400,13 +407,15 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
         setSubtitleFontFamilyDraft(subtitleFontFamily ?? '');
     }, [subtitleFontFamily]);
 
-    const resolvedBackgroundMode: VisualizerBackgroundMode = visualizerBackgroundMode ?? (visualizerMode === 'monet' ? 'monet' : 'common');
-    const backgroundModeOptions = useMemo<PresetOption<VisualizerBackgroundMode>[]>(() => ([
-        { value: 'common', label: t('options.visualizerBackgroundModeCommon') },
-        { value: 'monet', label: t('options.visualizerBackgroundModeMonet') },
-        { value: 'url', label: t('options.visualizerBackgroundModeUrl') || 'URL' },
-        { value: 'sora', label: t('options.visualizerBackgroundModeSora') },
-    ]), [t]);
+    const enablePlayerPageNativeBlur = useSettingsUiStore(state => state.enablePlayerPageNativeBlur);
+    const resolvedBackgroundMode = backgroundConfig?.mode ?? DEFAULT_VISUALIZER_BACKGROUND_MODE;
+    const backgroundEntry = getVisualizerBackgroundRegistryEntry(resolvedBackgroundMode);
+    const backgroundModeOptions = useMemo(() => (
+        VISUALIZER_BACKGROUND_REGISTRY.map(entry => ({
+            value: entry.mode,
+            label: getVisualizerBackgroundModeLabel(entry.mode, t),
+        }))
+    ), [t]);
 
     return (
         <div className="min-h-0 flex flex-col gap-4">
@@ -476,6 +485,55 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                             />
                         </div>
 
+                        <ToggleRow
+                            label={t('options.fontWeightAuto')}
+                            description={t('options.fontWeightAutoDesc')}
+                            checked={fontWeight === null}
+                            onChange={onFontWeightFollowChange}
+                            theme={theme}
+                        />
+
+                        {fontWeight !== null && (
+                            <div className="space-y-4">
+                                <PresetGroup
+                                    label={t('options.fontWeight')}
+                                    value={fontWeightSliderValue}
+                                    options={fontWeightOptions}
+                                    onChange={(next) => {
+                                        setFontWeightSliderValue(next);
+                                        onFontWeightChange(next);
+                                    }}
+                                    isDaylight={isDaylight}
+                                    theme={theme}
+                                />
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between text-sm" style={{ color: theme.primaryColor }}>
+                                        <span>{t('options.fontWeight')}</span>
+                                        <span className="font-mono opacity-70" style={{ color: theme.secondaryColor }}>
+                                            {fontWeightSliderValue}
+                                        </span>
+                                    </div>
+                                    <input
+                                        aria-label={t('options.fontWeight')}
+                                        type="range"
+                                        min="100"
+                                        max="900"
+                                        step="10"
+                                        value={fontWeightSliderValue}
+                                        onChange={(event) => {
+                                            const next = parseInt(event.target.value, 10);
+                                            setFontWeightSliderValue(next);
+                                            onFontWeightChange(next);
+                                        }}
+                                        onPointerDown={onSliderPointerDown}
+                                        onPointerUp={onSliderCommit}
+                                        onPointerCancel={onSliderCommit}
+                                        className={rangeInputClass}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
                         <div className="space-y-2">
                             <div className="flex items-center justify-between text-sm" style={{ color: theme.primaryColor }}>
                                 <span>{t('options.visualizerOpacity')}</span>
@@ -500,6 +558,12 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
 
                 {activeSection === 'background' && (
                     <>
+                        {enablePlayerPageNativeBlur && (
+                            <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-500 dark:text-amber-400">
+                                <AlertTriangle size={16} className="shrink-0 text-amber-500" />
+                                <span>{t('options.nativeBlurBackgroundNotice')}</span>
+                            </div>
+                        )}
                         <div className="rounded-[24px] border p-4 space-y-4" style={{ backgroundColor: controlCardBg, borderColor: colorWithAlpha(theme.secondaryColor, 0.16) }}>
                             <div className="flex items-start justify-between gap-3">
                                 <div className="space-y-1">
@@ -512,7 +576,9 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                                 </div>
                                 <ResetSectionButton
                                     label={t('ui.default')}
-                                    onClick={onResetBackgroundSettings}
+                                    onClick={backgroundEntry.resetSettings
+                                        ? () => backgroundEntry.resetSettings?.(backgroundActions)
+                                        : undefined}
                                     theme={theme}
                                 />
                             </div>
@@ -521,98 +587,23 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                                 label={t('options.visualizerBackgroundMode')}
                                 value={resolvedBackgroundMode}
                                 options={backgroundModeOptions}
-                                onChange={(mode) => onVisualizerBackgroundModeChange?.(mode)}
+                                onChange={(mode) => backgroundActions?.onModeChange?.(mode)}
                                 isDaylight={isDaylight}
                                 theme={theme}
                             />
                         </div>
 
-                        {resolvedBackgroundMode === 'common' ? (
-                            <>
-                                <div className="rounded-[24px] border p-4 space-y-4" style={{ backgroundColor: controlCardBg, borderColor: colorWithAlpha(theme.secondaryColor, 0.16) }}>
-                                    <ToggleRow
-                                        label={t('options.disableVisualizerVignette')}
-                                        description={t('options.disableVisualizerVignetteDesc')}
-                                        checked={disableVisualizerVignette}
-                                        onChange={onToggleDisableVisualizerVignette}
-                                        theme={theme}
-                                    />
-                                    <ToggleRow
-                                        label={t('options.disableVisualizerGeometricBackground')}
-                                        description={t('options.disableVisualizerGeometricBackgroundDesc')}
-                                        checked={disableVisualizerGeometricBackground}
-                                        onChange={onToggleDisableVisualizerGeometricBackground}
-                                        theme={theme}
-                                    />
-                                </div>
-
-                                <div className="rounded-[24px] border p-4 space-y-4" style={{ backgroundColor: controlCardBg, borderColor: colorWithAlpha(theme.secondaryColor, 0.16) }}>
-                                    <div className="space-y-2">
-                                            <div className="text-sm font-medium" style={{ color: theme.primaryColor }}>
-                                                {t('options.previewCoverBackgroundSettings')}
-                                            </div>
-                                            <div className="text-xs opacity-70" style={{ color: theme.secondaryColor }}>
-                                                {t('options.previewCoverBackgroundSettingsDesc')}
-                                            </div>
-
-                                        <ToggleRow
-                                            label={t('theme.addCoverColor')}
-                                            description={t('options.coverColorBackgroundDesc')}
-                                            checked={useCoverColorBg}
-                                            onChange={onToggleCoverColorBg}
-                                            theme={theme}
-                                        />
-
-                                        <div className="flex items-center justify-between text-sm" style={{ color: theme.primaryColor }}>
-                                            <span>{t('options.previewCoverBackgroundOpacity')}</span>
-                                            <span className="font-mono opacity-70" style={{ color: theme.secondaryColor }}>
-                                                {Math.round(backgroundOpacity * 100)}%
-                                            </span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="1"
-                                            step="0.05"
-                                            value={backgroundOpacity}
-                                            onChange={(event) => onBackgroundOpacityChange?.(parseFloat(event.target.value))}
-                                            onPointerDown={onSliderPointerDown}
-                                            onPointerUp={onSliderCommit}
-                                            className={rangeInputClass}
-                                        />
-                                    </div>
-                                </div>
-                            </>
-                        ) : resolvedBackgroundMode === 'url' ? (
-                            <UrlBackgroundSettingsCard
-                                t={t}
-                                isDaylight={isDaylight}
-                                theme={theme}
-                                controlCardBg={controlCardBg}
-                                urlBackgroundList={urlBackgroundList}
-                                urlBackgroundSelectedId={urlBackgroundSelectedId}
-                                onAddUrlBackgroundItem={onAddUrlBackgroundItem}
-                                onUpdateUrlBackgroundItem={onUpdateUrlBackgroundItem}
-                                onDeleteUrlBackgroundItem={onDeleteUrlBackgroundItem}
-                                onSetUrlBackgroundSelectedId={onSetUrlBackgroundSelectedId}
-                            />
-                        ) : resolvedBackgroundMode === 'monet' ? (
-                            <MonetBackgroundSettingsCard
-                                t={t}
-                                isDaylight={isDaylight}
-                                theme={theme}
-                                controlCardBg={controlCardBg}
-                                rangeInputClass={rangeInputClass}
-                                tuning={monetBackgroundTuning}
-                                onTuningChange={onMonetBackgroundTuningChange}
-                                monetBackgroundImage={monetBackgroundImage}
-                                onUploadMonetBackgroundImage={onUploadMonetBackgroundImage}
-                                onClearMonetBackgroundImage={onClearMonetBackgroundImage}
-                                isLoadingMonetBackgroundImage={isLoadingMonetBackgroundImage}
-                                onSliderPointerDown={onSliderPointerDown}
-                                onSliderCommit={onSliderCommit}
-                                />
-                        ) : null}
+                        {backgroundEntry.renderSettingsPanel?.({
+                            config: backgroundConfig,
+                            actions: backgroundActions,
+                            t,
+                            isDaylight,
+                            theme,
+                            controlCardBg,
+                            rangeInputClass,
+                            onSliderPointerDown,
+                            onSliderCommit,
+                        })}
                     </>
                 )}
 
@@ -678,6 +669,8 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                             onDioramaTuningChange,
                             monetTuning,
                             onMonetTuningChange,
+                            pendoloTuning,
+                            onPendoloTuningChange,
                             monetPortraitImage,
                             onUploadMonetPortraitImage,
                             onClearMonetPortraitImage,
@@ -715,13 +708,26 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                             icon={CaptionsOff}
                         />
 
-                        <ToggleRow
-                            label={t('options.showSubtitleTranslation')}
-                            description={t('options.showSubtitleTranslationDesc')}
-                            checked={showSubtitleTranslation}
-                            onChange={onToggleShowSubtitleTranslation}
+                        <PresetGroup
+                            label={t('options.subtitleContentMode')}
+                            value={subtitleContentMode}
+                            options={[
+                                { label: t('options.subtitleContentTranslation'), value: 'translation' },
+                                { label: t('options.subtitleContentRomanization'), value: 'romanization' },
+                                { label: t('options.subtitleContentNone'), value: 'none' },
+                            ]}
+                            onChange={onSubtitleContentModeChange ?? (mode => onToggleShowSubtitleTranslation?.(mode !== 'none'))}
+                            isDaylight={isDaylight}
                             theme={theme}
-                            icon={Languages}
+                        />
+
+                        <ToggleRow
+                            label={t('options.subtitleOverlayBackground')}
+                            description={t('options.subtitleOverlayBackgroundDesc')}
+                            checked={subtitleOverlayBackground}
+                            onChange={onToggleSubtitleOverlayBackground}
+                            theme={theme}
+                            icon={PanelTop}
                         />
 
                         <ToggleRow
@@ -732,6 +738,27 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                             theme={theme}
                             icon={Monitor}
                         />
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm" style={{ color: theme.primaryColor }}>
+                                <span>{t('options.subtitleFontScale')}</span>
+                                <span className="font-mono opacity-70" style={{ color: theme.secondaryColor }}>
+                                    {Math.round(subtitleFontScale * 100)}%
+                                </span>
+                            </div>
+                            <input
+                                aria-label={t('options.subtitleFontScale')}
+                                type="range"
+                                min="0.85"
+                                max="1.4"
+                                step="0.05"
+                                value={subtitleFontScale}
+                                onChange={(event) => onSubtitleFontScaleChange(parseFloat(event.target.value))}
+                                onPointerDown={onSliderPointerDown}
+                                onPointerUp={onSliderCommit}
+                                className={rangeInputClass}
+                            />
+                        </div>
 
                         {!subtitleFontInheritsLyrics && (
                             <div className="space-y-4">
@@ -750,6 +777,53 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                                     isDaylight={isDaylight}
                                     theme={theme}
                                 />
+                                <ToggleRow
+                                    label={t('options.fontWeightAuto')}
+                                    description={t('options.fontWeightAutoDesc')}
+                                    checked={subtitleFontWeight === null}
+                                    onChange={onSubtitleFontWeightFollowChange}
+                                    theme={theme}
+                                />
+                                {subtitleFontWeight !== null && (
+                                    <div className="space-y-4">
+                                        <PresetGroup
+                                            label={t('options.subtitleFontWeight')}
+                                            value={subtitleFontWeightSliderValue}
+                                            options={fontWeightOptions}
+                                            onChange={(next) => {
+                                                setSubtitleFontWeightSliderValue(next);
+                                                onSubtitleFontWeightChange?.(next);
+                                            }}
+                                            isDaylight={isDaylight}
+                                            theme={theme}
+                                        />
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between text-sm" style={{ color: theme.primaryColor }}>
+                                                <span>{t('options.subtitleFontWeight')}</span>
+                                                <span className="font-mono opacity-70" style={{ color: theme.secondaryColor }}>
+                                                    {subtitleFontWeightSliderValue}
+                                                </span>
+                                            </div>
+                                            <input
+                                                aria-label={t('options.subtitleFontWeight')}
+                                                type="range"
+                                                min="100"
+                                                max="900"
+                                                step="10"
+                                                value={subtitleFontWeightSliderValue}
+                                                onChange={(event) => {
+                                                    const next = parseInt(event.target.value, 10);
+                                                    setSubtitleFontWeightSliderValue(next);
+                                                    onSubtitleFontWeightChange?.(next);
+                                                }}
+                                                onPointerDown={onSliderPointerDown}
+                                                onPointerUp={onSliderCommit}
+                                                onPointerCancel={onSliderCommit}
+                                                className={rangeInputClass}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -772,6 +846,37 @@ const VisPlaygroundSettingsPanel: React.FC<VisPlaygroundSettingsPanelProps> = (p
                                 className={rangeInputClass}
                             />
                         </div>
+                    </div>
+                )}
+
+                {activeSection === 'subtitle' && (
+                    <div className="rounded-[24px] border p-4 space-y-4" style={{ backgroundColor: controlCardBg, borderColor: colorWithAlpha(theme.secondaryColor, 0.16) }}>
+                        <div className="space-y-1">
+                            <div className="text-sm font-medium" style={{ color: theme.primaryColor }}>
+                                {t('options.harmonySubtitleSettings')}
+                            </div>
+                            <div className="text-xs opacity-70" style={{ color: theme.secondaryColor }}>
+                                {t('options.harmonySubtitleSettingsDesc')}
+                            </div>
+                        </div>
+
+                        <ToggleRow
+                            label={t('options.showHarmonySubtitle')}
+                            description={t('options.showHarmonySubtitleDesc')}
+                            checked={showHarmonySubtitle}
+                            onChange={onToggleShowHarmonySubtitle}
+                            theme={theme}
+                            icon={Monitor}
+                        />
+
+                        <ToggleRow
+                            label={t('options.harmonySubtitleBackground')}
+                            description={t('options.harmonySubtitleBackgroundDesc')}
+                            checked={harmonySubtitleBackground}
+                            onChange={onToggleHarmonySubtitleBackground}
+                            theme={theme}
+                            icon={PanelTop}
+                        />
                     </div>
                 )}
             </div>

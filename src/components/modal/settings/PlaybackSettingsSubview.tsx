@@ -46,10 +46,8 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
         audioOutputDeviceId,
         autoUseBestLyric,
         convertSimplifiedLyricsToTraditional,
-        enableAlternativeLyricSources,
         preferredAlternativeLyricSource,
         queueAddBehavior,
-        onToggleAlternativeLyricSources,
         onToggleAutoUseBestLyric,
         onToggleConvertSimplifiedLyricsToTraditional,
         onPreferredAlternativeLyricSourceChange,
@@ -58,10 +56,8 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
         audioOutputDeviceId: state.audioOutputDeviceId,
         autoUseBestLyric: state.autoUseBestLyric,
         convertSimplifiedLyricsToTraditional: state.convertSimplifiedLyricsToTraditional,
-        enableAlternativeLyricSources: state.enableAlternativeLyricSources,
         preferredAlternativeLyricSource: state.preferredAlternativeLyricSource,
         queueAddBehavior: state.queueAddBehavior,
-        onToggleAlternativeLyricSources: state.handleToggleAlternativeLyricSources,
         onToggleAutoUseBestLyric: state.handleToggleAutoUseBestLyric,
         onToggleConvertSimplifiedLyricsToTraditional: state.handleToggleConvertSimplifiedLyricsToTraditional,
         onPreferredAlternativeLyricSourceChange: state.handleSetPreferredAlternativeLyricSource,
@@ -248,30 +244,15 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
                         <div className="space-y-1">
                             <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                                 <Settings2 size={14} />
-                                {t('options.enableAlternativeLyricSources')}
+                                {t('options.autoUseBestLyric')}
                             </div>
                             <div className="text-[11px] opacity-50 max-w-[420px]" style={{ color: 'var(--text-secondary)' }}>
-                                {t('options.enableAlternativeLyricSourcesDesc')}
+                                {t('options.autoUseBestLyricDesc')}
                             </div>
                         </div>
-                        {renderToggle(enableAlternativeLyricSources, () => onToggleAlternativeLyricSources(!enableAlternativeLyricSources))}
+                        {renderToggle(autoUseBestLyric, () => onToggleAutoUseBestLyric(!autoUseBestLyric))}
                     </div>
-                    {enableAlternativeLyricSources && (
-                        <div className="p-4 flex items-center justify-between gap-4 border-t" style={{ borderColor: 'var(--border-primary, rgba(255,255,255,0.06))' }}>
-                            <div className="space-y-1">
-                                <div className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                                    <Settings2 size={14} />
-                                    {t('options.autoUseBestLyric')}
-                                </div>
-                                <div className="text-[11px] opacity-50 max-w-[420px]" style={{ color: 'var(--text-secondary)' }}>
-                                    {t('options.autoUseBestLyricDesc')}
-                                </div>
-                            </div>
-                            {renderToggle(autoUseBestLyric, () => onToggleAutoUseBestLyric(!autoUseBestLyric))}
-                        </div>
-                    )}
-                    {enableAlternativeLyricSources && (
-                        <div className="p-4 space-y-3 border-t" style={{ borderColor: 'var(--border-primary, rgba(255,255,255,0.06))' }}>
+                    <div className="p-4 space-y-3 border-t" style={{ borderColor: 'var(--border-primary, rgba(255,255,255,0.06))' }}>
                             <div className="space-y-1">
                                 <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                                     {t('settings.lyricMatchPriority')}
@@ -299,8 +280,7 @@ const PlaybackSettingsSubview: React.FC<PlaybackSettingsSubviewProps> = ({
                                     );
                                 })}
                             </div>
-                        </div>
-                    )}
+                    </div>
                 </div>
             </section>
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compressConfig, decompressConfig } from '@/components/modal/settings/AppearanceSettingsSubview';
+import { compressConfig, decompressConfig } from '@/utils/appearanceCodec';
 
 // test/unit/visualizer/visualSettingsImportExport.test.ts
 // Verifies visual settings configuration compression, base64 encoding, and decompression/restoration.
@@ -36,12 +36,19 @@ describe('Visual Settings Import and Export', () => {
         visualizerOpacity: 0.95,
         hidePlayerTranslationSubtitle: true,
         showSubtitleTranslation: false,
+        subtitleContentMode: 'romanization' as const,
         convertSimplifiedLyricsToTraditional: true,
+        subtitleOverlayBackground: true,
+        showHarmonySubtitle: false,
+        harmonySubtitleBackground: true,
         lyricsFontStyle: 'sans',
         lyricsFontScale: 1.25,
+        lyricsFontWeight: 650,
         lyricsFontFallbackFamilies: ['Songti SC', 'SimSun', 'serif'],
         subtitleFontInheritsLyrics: false,
+        subtitleFontScale: 1.2,
         subtitleFontStyle: 'sans',
+        subtitleFontWeight: 350,
         subtitleFontFamily: 'Microsoft YaHei',
         subtitleFontFallbackFamilies: ['PingFang SC', 'sans-serif'],
         classicTuning: {
@@ -88,6 +95,34 @@ describe('Visual Settings Import and Export', () => {
             tiltStyleProbability: 0.4,
             colorScheme: 'accentAll' as const,
         },
+        dioramaTuning: {
+            cameraSpeed: 1.1,
+            motionAmount: 0.9,
+            audioReactivity: 0.8,
+            geometryVisibility: {
+                enabled: true,
+                mode: 'corridor' as const,
+                strands: true,
+                blobs: false,
+                ribbons: true,
+                rings: false,
+            },
+            particleDensity: 72,
+            particleScale: 1.4,
+            particleGlowEnabled: true,
+            particleGlowIntensity: 0.75,
+            showParticles: false,
+            backgroundParticleCircumference: 40,
+            backgroundParticleRadial: 3,
+            glowEnabled: true,
+            glowIntensity: 0.8,
+            soulEnabled: false,
+            soulIntensity: 1,
+            soulActiveEnabled: true,
+            gradientEnabled: true,
+            gradientIntensity: 0.7,
+            keywordColoringEnabled: false,
+        },
         monetBackgroundTuning: {
             backgroundSource: 'cover-derived' as const,
             backgroundLayout: 'half-pane-gradient' as const,
@@ -99,6 +134,32 @@ describe('Visual Settings Import and Export', () => {
             backgroundHalfPaneOffsetX: 5,
             backgroundWashColorMode: 'custom' as const,
             backgroundWashCustomColor: '#ff0000',
+        },
+        nomandBackgroundTuning: {
+            imageSource: 'uploaded-global' as const,
+            ditheringType: '4x4' as const,
+            size: 3.5,
+            colorSteps: 3,
+            originalColors: false,
+            inverted: true,
+            overlayEnabled: true,
+            overlayOpacity: 0.45,
+        },
+        latentBackgroundTuning: {
+            displayMode: 'mesh' as const,
+            colorSource: 'cover-only' as const,
+            dynamicOnlyInPlayer: false,
+            enhancedBeatResponse: false,
+            ditheringSpeed: 0.4,
+            ditheringAudioSpeed: 1.8,
+            ditheringSize: 3,
+            ditheringOpacity: 0.6,
+            meshSpeed: 0.25,
+            meshAudioSpeed: 2,
+            meshDistortion: 1.1,
+            meshSwirl: 0.3,
+            overlayEnabled: false,
+            overlayOpacity: 0.5,
         },
         monetTuning: {
             keywordColoringEnabled: false,
@@ -123,19 +184,33 @@ describe('Visual Settings Import and Export', () => {
         expect(decoded.backgroundOpacity).toBe(0.85);
         expect(decoded.hidePlayerTranslationSubtitle).toBe(true);
         expect(decoded.showSubtitleTranslation).toBe(false);
+        expect(decoded.subtitleContentMode).toBe('romanization');
         expect(decoded.convertSimplifiedLyricsToTraditional).toBe(true);
+        expect(decoded.subtitleOverlayBackground).toBe(true);
+        expect(decoded.showHarmonySubtitle).toBe(false);
+        expect(decoded.harmonySubtitleBackground).toBe(true);
+        expect(decoded.lyricsFontWeight).toBe(650);
         expect(decoded.lyricsFontFallbackFamilies).toEqual(['Songti SC', 'SimSun', 'serif']);
         expect(decoded.subtitleFontInheritsLyrics).toBe(false);
+        expect(decoded.subtitleFontScale).toBe(1.2);
         expect(decoded.subtitleFontStyle).toBe('sans');
+        expect(decoded.subtitleFontWeight).toBe(350);
         expect(decoded.subtitleFontFamily).toBe('Microsoft YaHei');
         expect(decoded.subtitleFontFallbackFamilies).toEqual(['PingFang SC', 'sans-serif']);
         expect(decoded.classicTuning?.breathingFloatMultiplier).toBe(1.2);
         expect(decoded.claddaghTuning?.focusScaleRatio).toBe(0.75);
         expect(decoded.claddaghTuning?.radiusScale).toBe(1.15);
         expect(decoded.claddaghTuning?.ellipseTiltDeg).toBe(52);
+        expect(decoded.dioramaTuning?.geometryVisibility).toEqual(sampleConfig.dioramaTuning.geometryVisibility);
+        expect(decoded.dioramaTuning?.showParticles).toBe(false);
+        expect(decoded.dioramaTuning?.soulActiveEnabled).toBe(true);
+        expect(decoded.dioramaTuning?.backgroundParticleCircumference).toBe(40);
+        expect(decoded.dioramaTuning?.backgroundParticleRadial).toBe(3);
         expect(decoded.theme?.light.name).toBe('Light Gold');
         expect(decoded.theme?.dark.accentColor).toBe('#fbbf24');
         expect(decoded.monetBackgroundTuning?.backgroundBlurPx).toBe(4);
+        expect(decoded.nomandBackgroundTuning).toEqual(sampleConfig.nomandBackgroundTuning);
+        expect(decoded.latentBackgroundTuning).toEqual(sampleConfig.latentBackgroundTuning);
         expect(decoded.monetTuning?.portraitOffsetX).toBe(-120);
         expect(decoded.monetTuning?.portraitStyle).toBe('square');
         expect(decoded.songThemeAutoSwitchEnabled).toBe(true);
@@ -160,10 +235,17 @@ describe('Visual Settings Import and Export', () => {
         expect(decoded.backgroundOpacity).toBe(0.85);
         expect(decoded.hidePlayerTranslationSubtitle).toBe(true);
         expect(decoded.showSubtitleTranslation).toBe(false);
+        expect(decoded.subtitleContentMode).toBe('romanization');
         expect(decoded.convertSimplifiedLyricsToTraditional).toBe(true);
+        expect(decoded.subtitleOverlayBackground).toBe(true);
+        expect(decoded.showHarmonySubtitle).toBe(false);
+        expect(decoded.harmonySubtitleBackground).toBe(true);
+        expect(decoded.lyricsFontWeight).toBe(650);
         expect(decoded.lyricsFontFallbackFamilies).toEqual(['Songti SC', 'SimSun', 'serif']);
         expect(decoded.subtitleFontInheritsLyrics).toBe(false);
+        expect(decoded.subtitleFontScale).toBe(1.2);
         expect(decoded.subtitleFontStyle).toBe('sans');
+        expect(decoded.subtitleFontWeight).toBe(350);
         expect(decoded.subtitleFontFamily).toBe('Microsoft YaHei');
         expect(decoded.subtitleFontFallbackFamilies).toEqual(['PingFang SC', 'sans-serif']);
         expect(decoded.claddaghTuning?.ellipseTiltDeg).toBe(52);
@@ -171,6 +253,47 @@ describe('Visual Settings Import and Export', () => {
         expect(decoded.theme?.dark.accentColor).toBe('#fbbf24');
         expect(decoded.songThemeAutoSwitchEnabled).toBe(true);
         expect(decoded.songThemeAutoGenerateEnabled).toBe(true);
+    });
+
+    it('round-trips null weights so imports can restore follow-visualizer mode', () => {
+        const decoded = decompressConfig(compressConfig({
+            lyricsFontWeight: null,
+            subtitleFontWeight: null,
+        }));
+
+        expect(decoded.lyricsFontWeight).toBeNull();
+        expect(decoded.subtitleFontWeight).toBeNull();
+    });
+
+    it('imports the legacy s2t Traditional-lyrics shortcode key', () => {
+        expect(decompressConfig(JSON.stringify({ s2t: true }))).toMatchObject({
+            convertSimplifiedLyricsToTraditional: true,
+        });
+    });
+
+    it('migrates the removed Nomand random dithering option to 8x8', () => {
+        const encoded = compressConfig({
+            nomandBackgroundTuning: {
+                imageSource: 'cover-derived',
+                ditheringType: 'random',
+                size: 2,
+                colorSteps: 2,
+                originalColors: false,
+                inverted: false,
+            },
+        });
+        const decoded = decompressConfig(encoded);
+
+        expect(decoded.nomandBackgroundTuning.ditheringType).toBe('8x8');
+        expect(decoded.nomandBackgroundTuning.overlayEnabled).toBe(true);
+        expect(decoded.nomandBackgroundTuning.overlayOpacity).toBe(0.35);
+    });
+
+    it('round-trips a Diorama-only short code including geometry child switches', () => {
+        const code = compressConfig({ dioramaTuning: sampleConfig.dioramaTuning });
+        const decoded = decompressConfig(code);
+
+        expect(decoded.dioramaTuning).toEqual(sampleConfig.dioramaTuning);
     });
 
     it('gracefully throws error on invalid configuration input strings', () => {

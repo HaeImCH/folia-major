@@ -40,6 +40,12 @@ describe('convertLyricDataToTraditional', () => {
                     endTime: 3,
                     words: [{ text: '风吹过', startTime: 2, endTime: 3 }],
                 },
+                backgroundVocals: [{
+                    text: '云散开',
+                    startTime: 2.5,
+                    endTime: 3.5,
+                    words: [{ text: '云散开', startTime: 2.5, endTime: 3.5 }],
+                }],
             }],
             ttml: {
                 agents: {
@@ -60,6 +66,7 @@ describe('convertLyricDataToTraditional', () => {
         expect(converted?.lines[0].alternateTexts?.[1].text).toBe('yin yue xiang qi');
         expect(converted?.lines[0].backgroundVocal?.text).toBe('風吹過');
         expect(converted?.lines[0].backgroundVocal?.romanization).toBe('feng chui guo');
+        expect(converted?.lines[0].backgroundVocals?.[0].text).toBe('雲散開');
         expect(converted?.ttml?.agents?.v1.name).toBe('歌手');
         expect(converted?.lines[0].startTime).toBe(1.25);
         expect(converted?.lines[0].words[0].endTime).toBe(2);

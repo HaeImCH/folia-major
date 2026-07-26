@@ -1,10 +1,14 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { UnifiedSong, ReplayGainMode } from '../../types';
 import { FileAudio, RefreshCw, FileText, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import LyricTimelineOffsetControl from './LyricTimelineOffsetControl';
 import { getLyricProviderLabel } from '../../utils/lyrics/lyricSourceLabels';
+import { getLocalSongs } from '../../services/db';
+import type { LocalSong } from '../../types';
+import { isLocalPlaybackSong } from '../../utils/appPlaybackGuards';
+import ReplayGainControl from './ReplayGainControl';
 
 interface LocalTabProps {
     currentSong: UnifiedSong;
@@ -40,15 +44,32 @@ const LocalTab: React.FC<LocalTabProps> = ({
     const { t } = useTranslation();
     const lrcInputRef = useRef<HTMLInputElement>(null);
 
-    const localData = currentSong.localData;
+    const [loadedLocalData, setLoadedLocalData] = useState<{
+        songId: string;
+        data: LocalSong | null;
+    } | null>(null);
+    const localSongId = currentSong.localRef?.songId;
+    const isLocalSong = isLocalPlaybackSong(currentSong);
+    const isLocalDataLoading = Boolean(localSongId && loadedLocalData?.songId !== localSongId);
+    const localData = loadedLocalData && loadedLocalData.songId === localSongId
+        ? loadedLocalData.data
+        : null;
 
-    if (!currentSong.isLocal || !localData) {
-        return (
-            <div className="flex items-center justify-center h-full opacity-60">
-                {t('localMusic.notALocalSong')}
-            </div>
-        );
-    }
+    useEffect(() => {
+        let active = true;
+        if (!localSongId) {
+            return;
+        }
+        void getLocalSongs().then(songs => {
+            if (active) {
+                setLoadedLocalData({
+                    songId: localSongId,
+                    data: songs.find(song => song.id === localSongId) || null,
+                });
+            }
+        });
+        return () => { active = false; };
+    }, [localSongId]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, isTranslation: boolean) => {
         const file = e.target.files?.[0];
@@ -70,6 +91,7 @@ const LocalTab: React.FC<LocalTabProps> = ({
     // Compute available lyrics sources
     const availableSources = useMemo(() => {
         const sources: { key: 'local' | 'embedded' | 'online'; label: string }[] = [];
+        if (!localData) return sources;
         if (localData.hasLocalLyrics) {
             sources.push({ key: 'local', label: t('localMusic.statusLocal') });
         }
@@ -84,6 +106,7 @@ const LocalTab: React.FC<LocalTabProps> = ({
 
     // Determine currently active source
     const activeSource = useMemo(() => {
+        if (!localData) return null;
         if (localData.lyricsSource) return localData.lyricsSource;
         // Default priority: local > embedded > online
         if (localData.hasLocalLyrics) return 'local';
@@ -92,16 +115,11 @@ const LocalTab: React.FC<LocalTabProps> = ({
         return null;
     }, [localData]);
 
-    // Style helpers
     const tabActiveBg = isDaylight ? 'bg-blue-500/15 text-blue-600' : 'bg-blue-500/20 text-blue-300';
     const tabInactiveBg = isDaylight ? 'bg-black/5 text-zinc-500 hover:bg-black/10' : 'bg-white/5 text-zinc-400 hover:bg-white/10';
-    const replayGainModes: { key: ReplayGainMode; label: string; }[] = [
-        { key: 'off', label: t('localMusic.replayGainOff') },
-        { key: 'track', label: t('localMusic.replayGainTrack') },
-        { key: 'album', label: t('localMusic.replayGainAlbum') }
-    ];
     const lyricsStatus = useMemo(() => {
         const states: string[] = [];
+        if (!localData) return t('localMusic.statusNone');
         if (localData.hasLocalLyrics) states.push(t('localMusic.statusLocal'));
         if (localData.hasEmbeddedLyrics) states.push(t('localMusic.statusEmbedded'));
         if ((localData.matchedLyrics?.lines?.length ?? 0) > 0) {
@@ -109,22 +127,27 @@ const LocalTab: React.FC<LocalTabProps> = ({
         }
         return states.length > 0 ? states.join(' / ') : t('localMusic.statusNone');
     }, [localData, t]);
-    const replayGainSummary = useMemo(() => {
-        const parts: string[] = [];
-        if (typeof localData.replayGainTrackGain === 'number') {
-            parts.push(`T ${localData.replayGainTrackGain > 0 ? '+' : ''}${localData.replayGainTrackGain.toFixed(1)} dB`);
-        }
-        if (typeof localData.replayGainAlbumGain === 'number') {
-            parts.push(`A ${localData.replayGainAlbumGain > 0 ? '+' : ''}${localData.replayGainAlbumGain.toFixed(1)} dB`);
-        }
-        return parts.length > 0 ? parts.join(' / ') : t('localMusic.replayGainUnavailable');
-    }, [localData, t]);
+    if (!isLocalSong) {
+        return <div className="min-h-96" aria-hidden="true" />;
+    }
+
+    if (isLocalDataLoading) {
+        return <div className="min-h-96" aria-busy="true" />;
+    }
+
+    if (!localData) {
+        return (
+            <div className="flex min-h-96 items-center justify-center px-4 text-center opacity-60">
+                {t('status.localSongNotInLibrary')}
+            </div>
+        );
+    }
 
     return (
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex flex-col space-y-6 pt-4 px-2"
+            className="flex min-h-96 flex-col space-y-6 pt-4 px-2"
         >
             {/* File Info */}
             <div className="space-y-3">
@@ -153,30 +176,15 @@ const LocalTab: React.FC<LocalTabProps> = ({
                 </div>
             </div>
 
-            {/* ReplayGain */}
-            <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold opacity-50 uppercase tracking-wider">
-                        音频增益
-                    </h3>
-                    <span className="text-[11px] opacity-60 text-right">
-                        {replayGainSummary}
-                    </span>
-                </div>
-                <div className="flex gap-1.5">
-                    {replayGainModes.map((mode) => (
-                        <button
-                            key={mode.key}
-                            onClick={() => onChangeReplayGainMode(mode.key)}
-                            className={`flex-1 text-xs py-1.5 px-2 rounded-lg font-medium transition-all ${
-                                replayGainMode === mode.key ? tabActiveBg : tabInactiveBg
-                            }`}
-                        >
-                            {mode.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
+            <ReplayGainControl
+                values={{
+                    trackGain: localData.replayGainTrackGain ?? localData.replayGain,
+                    albumGain: localData.replayGainAlbumGain,
+                }}
+                mode={replayGainMode}
+                onChangeMode={onChangeReplayGainMode}
+                isDaylight={isDaylight}
+            />
 
             {/* Lyrics Management */}
             <div className="space-y-3">

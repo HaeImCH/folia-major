@@ -1,14 +1,23 @@
 import { create } from 'zustand';
 import { getNavidromeConfig, navidromeApi } from '../services/navidromeService';
-import { neteaseApi } from '../services/netease';
-import type { HomeViewTab, LocalSong, UnifiedSong } from '../types';
+import type { HomeViewTab, LocalSong, SongResult, UnifiedSong } from '../types';
+import type { OnlineProviderId } from '../types/onlineMusic';
+import {
+    applyLocalLibraryEntityDisplay,
+    buildUnifiedLocalSong,
+    type LocalLibraryDisplayCatalog,
+} from '../services/playbackAdapters';
+import { omni } from '../services/onlineMusic/omni';
+import { isLocalPlaybackSong, isNavidromePlaybackSong } from '../utils/appPlaybackGuards';
 
 const LAST_HOME_VIEW_TAB_KEY = 'last_home_view_tab';
 const DEFAULT_SEARCH_LIMIT = 30;
+export type SearchSource = OnlineProviderId | 'local' | 'navidrome';
 export type SearchReturnView = 'home' | 'player';
 
 type SearchExecutorDeps = {
     localSongs: LocalSong[];
+    localLibraryCatalog?: LocalLibraryDisplayCatalog;
     t: (key: string, fallback?: string) => string;
 };
 
@@ -18,67 +27,89 @@ type SearchExecutionResult = {
     nextOffset: number;
 };
 
+type SearchCacheEntry = {
+    results: UnifiedSong[];
+    offset: number;
+    hasMore: boolean;
+    scrollTop: number;
+};
+
 interface SearchNavigationState {
     homeViewTab: HomeViewTab;
     searchQuery: string;
-    searchSourceTab: HomeViewTab;
+    searchSourceTab: SearchSource;
     searchResults: UnifiedSong[] | null;
     searchReturnView: SearchReturnView;
     isSearchOpen: boolean;
     isSearching: boolean;
     isLoadingMore: boolean;
+    searchError: string | null;
+    requestId: number;
     offset: number;
     limit: number;
     hasMore: boolean;
     scrollTop: number;
+    searchCache: Record<string, SearchCacheEntry>;
     setHomeViewTab: (tab: HomeViewTab) => void;
     setSearchQuery: (query: string) => void;
     setSearchScrollTop: (scrollTop: number) => void;
-    restoreSearch: (payload: { query: string; sourceTab: HomeViewTab; returnView?: SearchReturnView; }) => void;
+    restoreSearch: (payload: { query: string; sourceTab: SearchSource; returnView?: SearchReturnView; }) => void;
     hideSearchOverlay: () => void;
-    submitSearch: (payload: { query?: string; sourceTab: HomeViewTab; deps: SearchExecutorDeps; returnView?: SearchReturnView; }) => Promise<boolean>;
+    resetRuntime: (onlineProviderId?: OnlineProviderId) => void;
+    submitSearch: (payload: { query?: string; sourceTab: SearchSource; deps: SearchExecutorDeps; returnView?: SearchReturnView; }) => Promise<boolean>;
     loadMoreSearchResults: (payload: { deps: SearchExecutorDeps; }) => Promise<void>;
 }
 
+const getSearchCacheKey = (query: string, sourceTab: SearchSource) => (
+    `${sourceTab}:${query.trim().toLowerCase()}`
+);
+
+export const resolveSearchSource = (tab: HomeViewTab | SearchSource): SearchSource => {
+    if (tab === 'local' || tab === 'navidrome') {
+        return tab;
+    }
+    if (tab !== 'playlist' && tab !== 'albums' && tab !== 'radio') return tab as OnlineProviderId;
+    return 'netease';
+};
+
+export const resolveCommandPaletteSearchSource = (
+    currentSong: SongResult | null,
+    searchSourceTab: SearchSource,
+    activeOnlineProviderId: OnlineProviderId,
+): SearchSource => {
+    if (currentSong && isLocalPlaybackSong(currentSong)) return 'local';
+    if (currentSong && isNavidromePlaybackSong(currentSong)) return 'navidrome';
+    if (currentSong || searchSourceTab === 'netease') return activeOnlineProviderId;
+    return searchSourceTab;
+};
+
 const mapLocalSongToUnifiedSong = (
     song: LocalSong,
-    index: number,
-    t: SearchExecutorDeps['t']
-): UnifiedSong => ({
-    id: -(Date.now() + index),
-    name: song.title || song.embeddedTitle || song.fileName,
-    artists: [{ id: 0, name: song.artist || song.embeddedArtist || t('player.unknownArtist') }],
-    album: {
-        id: 0,
-        name: song.album || song.embeddedAlbum || t('player.unknownAlbum'),
-        picUrl: song.matchedCoverUrl || undefined,
-    },
-    duration: song.duration,
-    al: {
-        id: 0,
-        name: song.album || song.embeddedAlbum || t('player.unknownAlbum'),
-        picUrl: song.matchedCoverUrl || undefined,
-    },
-    ar: [{ id: 0, name: song.artist || song.embeddedArtist || t('player.unknownArtist') }],
-    dt: song.duration,
-    isLocal: true,
-    localData: song,
-});
+    catalog?: LocalLibraryDisplayCatalog,
+): UnifiedSong => applyLocalLibraryEntityDisplay(buildUnifiedLocalSong({
+        localSong: song,
+        matchedSong: null,
+        coverUrl: song.useOnlineCover ? song.onlineMetadata?.coverUrl || null : null,
+        preferOnlineMetadata: false,
+    }), catalog);
 
 const searchLocalSongs = (
-    localSongs: LocalSong[],
+    deps: SearchExecutorDeps,
     query: string,
-    t: SearchExecutorDeps['t']
 ): SearchExecutionResult => {
     const lowerQuery = query.toLowerCase();
-    const results = localSongs
+    const results = deps.localSongs
         .filter(song => {
-            const title = (song.title || song.embeddedTitle || song.fileName || '').toLowerCase();
-            const artist = (song.artist || song.embeddedArtist || '').toLowerCase();
-            const album = (song.album || song.embeddedAlbum || '').toLowerCase();
+            const title = song.title.toLowerCase();
+            const artist = [
+                ...song.importedMetadata.artistNames,
+                ...song.onlineMetadata?.artists.map(item => item.name) || [],
+            ].join(' ').toLowerCase();
+            const album = [song.importedMetadata.albumName, song.onlineMetadata?.album?.name]
+                .filter(Boolean).join(' ').toLowerCase();
             return title.includes(lowerQuery) || artist.includes(lowerQuery) || album.includes(lowerQuery);
         })
-        .map((song, index) => mapLocalSongToUnifiedSong(song, index, t));
+        .map(song => mapLocalSongToUnifiedSong(song, deps.localLibraryCatalog));
 
     return {
         results,
@@ -96,12 +127,7 @@ const searchNavidromeSongs = async (query: string): Promise<SearchExecutionResul
     const response = await navidromeApi.search(config, query, 0, 0, DEFAULT_SEARCH_LIMIT);
     const results = (response.song || []).map(song => {
         const navidromeSong = navidromeApi.toNavidromeSong(config, song);
-        return {
-            ...navidromeSong,
-            ar: navidromeSong.artists,
-            al: navidromeSong.album,
-            dt: navidromeSong.duration,
-        } as UnifiedSong;
+        return navidromeSong as UnifiedSong;
     });
 
     return {
@@ -111,34 +137,32 @@ const searchNavidromeSongs = async (query: string): Promise<SearchExecutionResul
     };
 };
 
-const searchNeteaseSongs = async (query: string, limit: number, offset: number): Promise<SearchExecutionResult> => {
-    const response = await neteaseApi.cloudSearch(query, limit, offset);
-    const results = (response.result?.songs || []) as UnifiedSong[];
-    const totalCount = response.result?.songCount || 0;
-
-    return {
-        results,
-        hasMore: offset + results.length < totalCount,
-        nextOffset: offset + results.length,
-    };
+const searchOnlineProviderSongs = async (
+    providerId: OnlineProviderId,
+    query: string,
+    limit: number,
+    offset: number,
+): Promise<SearchExecutionResult> => {
+    const page = await omni.searchProviderSongs(providerId, query, { limit, offset });
+    return { results: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset };
 };
 
 const executeSearch = async (
     query: string,
-    sourceTab: HomeViewTab,
+    sourceTab: SearchSource,
     offset: number,
     limit: number,
     deps: SearchExecutorDeps
 ): Promise<SearchExecutionResult> => {
     if (sourceTab === 'local') {
-        return searchLocalSongs(deps.localSongs, query, deps.t);
+        return searchLocalSongs(deps, query);
     }
 
     if (sourceTab === 'navidrome') {
         return searchNavidromeSongs(query);
     }
 
-    return searchNeteaseSongs(query, limit, offset);
+    return searchOnlineProviderSongs(sourceTab, query, limit, offset);
 };
 
 const getInitialHomeViewTab = (): HomeViewTab => {
@@ -154,16 +178,19 @@ const getInitialHomeViewTab = (): HomeViewTab => {
 export const useSearchNavigationStore = create<SearchNavigationState>((set, get) => ({
     homeViewTab: getInitialHomeViewTab(),
     searchQuery: '',
-    searchSourceTab: 'playlist',
+    searchSourceTab: 'netease',
     searchResults: null,
     searchReturnView: 'home',
     isSearchOpen: false,
     isSearching: false,
     isLoadingMore: false,
+    searchError: null,
+    requestId: 0,
     offset: 0,
     limit: DEFAULT_SEARCH_LIMIT,
     hasMore: false,
     scrollTop: 0,
+    searchCache: {},
     setHomeViewTab: (tab) => {
         if (typeof window !== 'undefined') {
             localStorage.setItem(LAST_HOME_VIEW_TAB_KEY, tab);
@@ -171,20 +198,57 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
         set({ homeViewTab: tab });
     },
     setSearchQuery: (query) => set({ searchQuery: query }),
-    setSearchScrollTop: (scrollTop) => set({ scrollTop }),
-    restoreSearch: ({ query, sourceTab, returnView = 'home' }) => set({
-        searchQuery: query,
-        searchSourceTab: sourceTab,
-        searchReturnView: returnView,
-        isSearchOpen: true,
+    setSearchScrollTop: (scrollTop) => set(state => {
+        const cacheKey = getSearchCacheKey(state.searchQuery, state.searchSourceTab);
+        const cached = state.searchCache[cacheKey];
+        return {
+            scrollTop,
+            searchCache: cached
+                ? {
+                    ...state.searchCache,
+                    [cacheKey]: { ...cached, scrollTop },
+                }
+                : state.searchCache,
+        };
+    }),
+    restoreSearch: ({ query, sourceTab, returnView = 'home' }) => set(state => {
+        const cached = state.searchCache[getSearchCacheKey(query, sourceTab)];
+        return {
+            searchQuery: query,
+            searchSourceTab: sourceTab,
+            searchReturnView: returnView,
+            searchResults: cached?.results ?? null,
+            offset: cached?.offset ?? 0,
+            hasMore: cached?.hasMore ?? false,
+            scrollTop: cached?.scrollTop ?? 0,
+            searchError: null,
+            isSearching: false,
+            isLoadingMore: false,
+            isSearchOpen: true,
+        };
     }),
     hideSearchOverlay: () => set({ isSearchOpen: false, searchReturnView: 'home' }),
+    resetRuntime: (onlineProviderId) => set(state => ({
+        searchQuery: '',
+        searchSourceTab: onlineProviderId ?? state.searchSourceTab,
+        searchResults: null,
+        searchReturnView: 'home',
+        isSearchOpen: false,
+        isSearching: false,
+        isLoadingMore: false,
+        searchError: null,
+        requestId: state.requestId + 1,
+        offset: 0,
+        hasMore: false,
+        scrollTop: 0,
+    })),
     submitSearch: async ({ query, sourceTab, deps, returnView = 'home' }) => {
         const trimmedQuery = (query ?? get().searchQuery).trim();
         if (!trimmedQuery) {
             return false;
         }
 
+        const requestId = get().requestId + 1;
         set({
             searchQuery: trimmedQuery,
             searchSourceTab: sourceTab,
@@ -192,6 +256,8 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             isSearchOpen: true,
             isSearching: true,
             isLoadingMore: false,
+            searchError: null,
+            requestId,
             searchResults: null,
             offset: 0,
             hasMore: false,
@@ -200,20 +266,36 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
 
         try {
             const result = await executeSearch(trimmedQuery, sourceTab, 0, get().limit, deps);
-            set({
+            if (get().requestId !== requestId) {
+                return true;
+            }
+            set(state => ({
                 searchResults: result.results,
                 hasMore: result.hasMore,
                 offset: result.nextOffset,
                 isSearching: false,
-            });
+                searchCache: {
+                    ...state.searchCache,
+                    [getSearchCacheKey(trimmedQuery, sourceTab)]: {
+                        results: result.results,
+                        hasMore: result.hasMore,
+                        offset: result.nextOffset,
+                        scrollTop: 0,
+                    },
+                },
+            }));
             return true;
         } catch (error) {
             console.error('[SearchStore] submitSearch failed:', error);
+            if (get().requestId !== requestId) {
+                return true;
+            }
             set({
                 searchResults: [],
                 hasMore: false,
                 offset: 0,
                 isSearching: false,
+                searchError: error instanceof Error ? error.message : 'search_failed',
             });
             return true;
         }
@@ -241,19 +323,40 @@ export const useSearchNavigationStore = create<SearchNavigationState>((set, get)
             return;
         }
 
-        set({ isLoadingMore: true });
+        const requestId = get().requestId;
+        set({ isLoadingMore: true, searchError: null });
 
         try {
             const result = await executeSearch(searchQuery, searchSourceTab, offset, limit, deps);
-            set({
-                searchResults: [...(searchResults || []), ...result.results],
-                hasMore: result.hasMore,
-                offset: result.nextOffset,
-                isLoadingMore: false,
+            if (get().requestId !== requestId) {
+                return;
+            }
+            set(state => {
+                const results = [...(searchResults || []), ...result.results];
+                return {
+                    searchResults: results,
+                    hasMore: result.hasMore,
+                    offset: result.nextOffset,
+                    isLoadingMore: false,
+                    searchCache: {
+                        ...state.searchCache,
+                        [getSearchCacheKey(searchQuery, searchSourceTab)]: {
+                            results,
+                            hasMore: result.hasMore,
+                            offset: result.nextOffset,
+                            scrollTop: state.scrollTop,
+                        },
+                    },
+                };
             });
         } catch (error) {
             console.error('[SearchStore] loadMoreSearchResults failed:', error);
-            set({ isLoadingMore: false });
+            if (get().requestId === requestId) {
+                set({
+                    isLoadingMore: false,
+                    searchError: error instanceof Error ? error.message : 'search_failed',
+                });
+            }
         }
     },
 }));

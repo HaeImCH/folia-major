@@ -30,6 +30,7 @@ import {
     getBaseThemeForMode,
     resolveBgModeTheme,
 } from './themeControllerState';
+import { getPlaybackSongKey } from '../utils/appPlaybackGuards';
 
 type StatusSetter = Dispatch<SetStateAction<StatusMessage | null>>;
 export type GenerateAIThemeOptions = {
@@ -187,13 +188,17 @@ export function useThemeController({
         currentSongHasLocalAiTheme,
     }), [aiTheme, bgMode, customTheme, daylightTheme, defaultTheme, isDaylight, legacyTheme, currentSongHasLocalAiTheme]);
 
-    const getPreferenceSwitchState = (): ThemePreferenceSwitchState => ({
-        isCustomThemePreferred,
-        songThemeAutoSwitchEnabled,
-        songThemeAutoGenerateEnabled,
-    });
+    // The three switches are mutually constrained by the resolvers, so they are only ever written
+    // together through applyPreferenceSwitchState -- which lets a ref mirror them exactly. Reading the
+    // render-scoped state instead would make two resolver calls in one handler (config import applies
+    // both song-theme flags back to back) both start from the pre-import snapshot, so the second
+    // write would silently discard the first.
+    const preferenceSwitchRef = useRef<ThemePreferenceSwitchState>(initialThemePreferenceState);
+
+    const getPreferenceSwitchState = (): ThemePreferenceSwitchState => preferenceSwitchRef.current;
 
     const applyPreferenceSwitchState = (state: ThemePreferenceSwitchState) => {
+        preferenceSwitchRef.current = state;
         setIsCustomThemePreferred(state.isCustomThemePreferred);
         setSongThemeAutoSwitchEnabled(state.songThemeAutoSwitchEnabled);
         setSongThemeAutoGenerateEnabled(state.songThemeAutoGenerateEnabled);
@@ -406,7 +411,7 @@ export function useThemeController({
         setBgMode('ai');
         void saveToCache('last_dual_theme', sanitized);
         const syncSong = songOrKey && typeof songOrKey === 'object' ? songOrKey : null;
-        const songKey = syncSong?.id ?? songOrKey;
+        const songKey = syncSong ? getPlaybackSongKey(syncSong) : songOrKey;
         if (songKey != null) {
             void saveToCache(`dual_theme_${songKey}`, sanitized);
         }
@@ -549,7 +554,7 @@ export function useThemeController({
         options: GenerateAIThemeOptions = {},
     ): Promise<GenerateAIThemeResult> => {
         const source = options.source ?? 'manual';
-        const songKey = currentSong?.id != null ? String(currentSong.id) : '__no_song__';
+        const songKey = currentSong ? getPlaybackSongKey(currentSong) : '__no_song__';
         if (themeGenerationSongKeysRef.current.has(songKey)) {
             return { status: 'skipped', reason: 'in-flight' };
         }
@@ -576,7 +581,7 @@ export function useThemeController({
             });
             const normalizedDualTheme = applyStoredAnimationIntensityToDualTheme(sanitizeDualTheme(dualTheme));
             if (currentSong) {
-                await saveToCache(`dual_theme_${currentSong.id}`, normalizedDualTheme);
+                await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, normalizedDualTheme);
                 saveSyncedThemeWithoutBlocking(currentSong, normalizedDualTheme, source === 'auto' ? 'auto' : 'manual');
                 setCurrentSongHasLocalAiTheme(true);
             }
@@ -605,7 +610,7 @@ export function useThemeController({
                 const fallbackTheme = applyStoredAnimationIntensityToDualTheme(buildBuiltinDualTheme({ coverColors }));
 
                 if (currentSong) {
-                    await saveToCache(`dual_theme_${currentSong.id}`, fallbackTheme);
+                    await saveToCache(`dual_theme_${getPlaybackSongKey(currentSong)}`, fallbackTheme);
                     saveSyncedThemeWithoutBlocking(currentSong, fallbackTheme, 'fallback');
                 }
 

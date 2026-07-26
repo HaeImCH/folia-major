@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronLeft } from 'lucide-react';
 import { loadCachedOrFetchCover } from './services/coverCache';
 import VisualizerRenderer from './components/visualizer/VisualizerRenderer';
+import type { VisualizerBackgroundConfig } from './components/visualizer/backgrounds/definition';
 import CommandPalette from './components/command-palette/CommandPalette';
 import { useCommandPalette } from './components/command-palette/useCommandPalette';
 import AppShell from './components/app/AppShell';
@@ -20,8 +21,8 @@ import { buildAppDialogsModel } from './components/app/dialogs/buildAppDialogsMo
 import { buildHomeModel } from './components/app/home/buildHomeModel';
 import { createLyricFilterPatternSaver } from './components/app/home/createLyricFilterPatternSaver';
 import { createLocalLibraryNavigation } from './components/app/navigation/createLocalLibraryNavigation';
-import { createNavidromeNavigation } from './components/app/navigation/createNavidromeNavigation';
 import { createPanelNavigation } from './components/app/navigation/createPanelNavigation';
+import { createOnlineGridViewCollection } from './components/app/home/gridViewCollectionAdapters';
 import { buildAppStyle } from './components/app/presentation/buildAppStyle';
 import { buildDebugSnapshot } from './components/app/presentation/buildDebugSnapshot';
 import { buildHomeSurfacePresentation } from './components/app/presentation/buildHomeSurfacePresentation';
@@ -33,13 +34,22 @@ import { useTraditionalChineseLyrics } from './hooks/useTraditionalChineseLyrics
 import { createOnlineRecoveryController } from './components/app/playback/createOnlineRecoveryController';
 import { persistPlaybackCache } from './components/app/playback/persistPlaybackCache';
 import { buildAppOverlaysModel } from './components/app/overlays/buildAppOverlaysModel';
+import {
+    createSearchAlbumCollection,
+    createSearchArtistCollection,
+} from './components/app/search/searchCollectionAdapters';
 import { buildPlayerPanelModel } from './components/app/player-panel/buildPlayerPanelModel';
 import { createQueueMutations } from './components/app/player-panel/createQueueMutations';
-import { LyricData, Theme, PlayerState, SongResult, ReplayGainMode, StatusMessage, PlaybackContext, StageLoopMode } from './types';
-import { isSongMarkedUnavailable, neteaseApi } from './services/netease';
+import { Album, Artist, LyricData, Theme, PlayerState, SongResult, ReplayGainMode, StatusMessage, PlaybackContext, StageLoopMode, UnifiedSong } from './types';
+import type { MediaId, OnlineProviderId, ProviderCollection } from './types/onlineMusic';
+import { resolveSongCatalogRef } from './services/onlineMusic/catalogRefs';
+import { omni } from './services/onlineMusic/omni';
+import { getSongAlbumLabel, getSongArtistLabel, getSongCoverUrl } from './services/onlineMusic/songMetadata';
 import { isNavidromeEnabled } from './services/navidromeService';
 import { useAppNavigation } from './hooks/useAppNavigation';
 import { useNeteaseLibrary } from './hooks/useNeteaseLibrary';
+import { useKugouLibrary } from './hooks/useKugouLibrary';
+import { useOnlineProviderPlatform } from './hooks/useOnlineProviderPlatform';
 import { useAppPreferences } from './hooks/useAppPreferences';
 import { useElectronPlaybackBridge } from './hooks/useElectronPlaybackBridge';
 import { useElectronNeteaseApiStatus } from './hooks/useElectronNeteaseApiStatus';
@@ -54,6 +64,7 @@ import { useLibraryPlaybackController } from './hooks/useLibraryPlaybackControll
 import { useNavidromeScrobbleReporter } from './hooks/useNavidromeScrobbleReporter';
 import { usePlaybackQueueController } from './hooks/usePlaybackQueueController';
 import { usePlaybackTransportController } from './hooks/usePlaybackTransportController';
+import { useLocalLibraryCatalog } from './hooks/useLocalLibraryCatalog';
 import { usePlaybackVisualizerBridge } from './hooks/usePlaybackVisualizerBridge';
 import { useRandomVisualizerMode } from './hooks/useRandomVisualizerMode';
 import { useObsBrowserSourcePublisher } from './hooks/useObsBrowserSourcePublisher';
@@ -63,46 +74,30 @@ import { useStagePlaybackController } from './hooks/useStagePlaybackController';
 import { useSpotifyPlaybackControls } from './hooks/useSpotifyPlaybackControls';
 import { useSongThemeAutoGeneration } from './hooks/useSongThemeAutoGeneration';
 import { useThemeController } from './hooks/useThemeController';
+import { useOnlineSongMetadataHydration } from './hooks/useOnlineSongMetadataHydration';
 import { useThemeQuickEditorStore } from './stores/useThemeQuickEditorStore';
-import { useSearchNavigationStore } from './stores/useSearchNavigationStore';
+import { resolveCommandPaletteSearchSource, resolveSearchSource, useSearchNavigationStore } from './stores/useSearchNavigationStore';
+import { useCollectionNavigationStore } from './stores/useCollectionNavigationStore';
 import { useSettingsUiStore } from './stores/useSettingsUiStore';
 import { useShallow } from 'zustand/react/shallow';
 import { clampMediaVolume } from './utils/appPlaybackHelpers';
-import { isLocalPlaybackSong, isNavidromePlaybackSong, isStagePlaybackSong, resolveNavidromePlaybackCarrier } from './utils/appPlaybackGuards';
+import { getOnlineProviderIdForSong, isLocalPlaybackSong, isNavidromePlaybackSong, isStagePlaybackSong, resolveNavidromePlaybackCarrier } from './utils/appPlaybackGuards';
 import { readLyricOffset, writeLyricOffset } from './utils/lyrics/lyricOffsetMemory';
 import { FALLBACK_AI_DUAL_THEME } from './services/themeSanitizer';
+import { BASE_DUAL_THEME, DAYLIGHT_THEME, DEFAULT_THEME } from './services/baseThemes';
 import { initializeSyncCoordinator } from './services/sync/syncCoordinator';
+import { applyLocalLibraryEntityDisplay } from './services/playbackAdapters';
+import { clearPrefetchRuntime } from './services/prefetchService';
+import { buildLocalLibraryIndex, followEntityRedirect } from './utils/localLibraryIndex';
 import type { PlayerChromeVisibilityMode } from './types/remoteControl';
 
 const LOCAL_MUSIC_UPDATED_EVENT = 'folia-local-music-updated';
 const DEV_DEBUG_SHORTCUT_LABEL = 'Alt+Shift+D';
 const ONLINE_AUDIO_URL_TTL_MS = 1200 * 1000;
 const ONLINE_AUDIO_URL_REFRESH_BUFFER_MS = 60 * 1000;
+const HOME_PROVIDER_REFRESH_COOLDOWN_MS = 5_000;
 const PLAYER_CHROME_HIDDEN_STORAGE_KEY = 'player_chrome_hidden';
 const LOCAL_TAIL_DECODE_ERROR_TOLERANCE_SEC = 3;
-// Default Theme
-// 午夜墨染
-const DEFAULT_THEME: Theme = {
-    name: "Midnight Default",
-    backgroundColor: "#09090b", // zinc-950
-    primaryColor: "#f4f4f5", // zinc-100
-    accentColor: "#f4f4f5", // zinc-100
-    secondaryColor: "#71717a", // zinc-500
-    fontStyle: "sans",
-    animationIntensity: "normal"
-};
-
-// 日光素白
-const DAYLIGHT_THEME: Theme = {
-    name: "Daylight Default",
-    backgroundColor: "#f5f5f4", // stone-100 (Pearl White-ish)
-    primaryColor: "#1c1917", // stone-900
-    accentColor: "#ea580c", // orange-600
-    secondaryColor: "#44403c", // stone-700
-    fontStyle: "sans",
-    animationIntensity: "normal"
-};
-
 
 export default function App() {
     const { t } = useTranslation();
@@ -116,6 +111,7 @@ export default function App() {
     // Player Data
     const [audioSrc, setAudioSrc] = useState<string | null>(null);
     const [currentSong, setCurrentSong] = useState<SongResult | null>(null);
+    useOnlineSongMetadataHydration(currentSong, setCurrentSong);
     const [sourceLyrics, setLyricsState] = useState<LyricData | null>(null);
     const [lyricTimelineOffsetMs, setLyricTimelineOffsetMs] = useState(0);
     const [cachedCoverUrl, setCachedCoverUrl] = useState<string | null>(null);
@@ -145,9 +141,6 @@ export default function App() {
         openSettings,
         settingsModalState,
         homeLayoutStyle,
-        setActiveGridViewCollection,
-        enableAlternativeLyricSources,
-        handleToggleAlternativeLyricSources,
         lastSeenGuideVersion,
         setLastSeenGuideVersion,
         setIsUserGuideModalOpen,
@@ -157,9 +150,6 @@ export default function App() {
         openSettings: state.openSettings,
         settingsModalState: state.settingsModalState,
         homeLayoutStyle: state.homeLayoutStyle,
-        setActiveGridViewCollection: state.setActiveGridViewCollection,
-        enableAlternativeLyricSources: state.enableAlternativeLyricSources,
-        handleToggleAlternativeLyricSources: state.handleToggleAlternativeLyricSources,
         lastSeenGuideVersion: state.lastSeenGuideVersion,
         setLastSeenGuideVersion: state.setLastSeenGuideVersion,
         setIsUserGuideModalOpen: state.setIsUserGuideModalOpen,
@@ -253,7 +243,7 @@ export default function App() {
     const blobUrlRef = useRef<string | null>(null);
     const queueScrollRef = useRef<HTMLDivElement>(null);
     const shouldAutoPlay = useRef(false);
-    const currentSongRef = useRef<number | null>(null);
+    const currentSongRef = useRef<string | number | null>(null);
     const currentSongFullRef = useRef<SongResult | null>(null);
     useEffect(() => {
         currentSongFullRef.current = currentSong;
@@ -280,7 +270,7 @@ export default function App() {
     });
     const localFileBlobsRef = useRef<Map<string, string>>(new Map()); // id -> blob URL
 
-    // Navigation Persistence State (Lifted from Home/LocalMusicView)
+    // Navigation persistence state shared by the Grid home surfaces.
     const homeViewTab = useSearchNavigationStore(state => state.homeViewTab);
     const setHomeViewTab = useSearchNavigationStore(state => state.setHomeViewTab);
     const handleToggleNavidromeEnabled = useCallback((enabled: boolean) => {
@@ -305,6 +295,7 @@ export default function App() {
         hidePlayerTranslationSubtitle,
         showSubtitleTranslation,
         convertSimplifiedLyricsToTraditional,
+        subtitleContentMode,
         hidePlayerRightPanelButton,
         transparentPlayerBackground,
         enablePlayerPageNativeBlur,
@@ -318,6 +309,9 @@ export default function App() {
         enableMediaCache,
         backgroundOpacity,
         subtitleOverlayOpacity,
+        subtitleOverlayBackground,
+        showHarmonySubtitle,
+        harmonySubtitleBackground,
         visualizerOpacity,
         visualizerBackgroundMode,
         isDaylight,
@@ -332,7 +326,10 @@ export default function App() {
         tiltTuning,
         dioramaTuning,
         monetBackgroundTuning,
+        nomandBackgroundTuning,
+        latentBackgroundTuning,
         monetTuning,
+        pendoloTuning,
         cappellaCustomEmojiImages,
         isLoadingCappellaCustomEmojiPack,
         cappellaCustomAvatarImages,
@@ -342,16 +339,26 @@ export default function App() {
         urlBackgroundSelectedId,
         lyricsFontStyle,
         lyricsFontScale,
+        subtitleFontScale,
+        lyricsFontWeight,
         lyricsCustomFontFamily,
         lyricsCustomFontLabel,
         lyricsFontFallbackFamilies,
         subtitleFontInheritsLyrics,
         subtitleFontStyle,
+        subtitleFontWeight,
         subtitleFontFamily,
         subtitleFontFallbackFamilies,
         lyricFilterPattern,
         showOpenPanelCloseButton,
+        alwaysShowPlayerBackButton,
+        alwaysShowMainWindowTitlebar,
         enableNowPlayingStage,
+        enablePlayerCapStage,
+        playerCapHost,
+        playerCapPlayer,
+        playerCapTimeBasis,
+        playerCapSticky,
         queueAddBehavior,
         audioOutputDeviceId,
         loopMode,
@@ -362,6 +369,8 @@ export default function App() {
         handleToggleHidePlayerTranslationSubtitle,
         handleToggleShowSubtitleTranslation,
         handleToggleConvertSimplifiedLyricsToTraditional,
+        handleSetSubtitleContentMode,
+        handleToggleSubtitleOverlayBackground,
         handleToggleHidePlayerRightPanelButton,
         handleToggleTransparentPlayerBackground,
         handleToggleDisableVisualizerVignette,
@@ -369,6 +378,8 @@ export default function App() {
         handleToggleMinimizeToTray,
         handleToggleHideTaskbarIcon,
         handleToggleOpenPlayerOnLaunch,
+        voiceInputPauseEnabled,
+        handleToggleVoiceInputPause,
         handleToggleMediaCache,
         handleSetBackgroundOpacity,
         setDaylightPreference,
@@ -376,6 +387,7 @@ export default function App() {
         handleToggleRandomVisualizerModePerSong,
         handleSetVisualizerBackgroundMode,
         handleSetMonetBackgroundTuning,
+        handleSetLatentBackgroundTuning,
         handleSetMonetTuning,
         handleSetCadenzaTuning,
         handleResetCadenzaTuning,
@@ -391,11 +403,14 @@ export default function App() {
         handleClearCustomCappellaEmojiPack,
         handleSetLyricsFontStyle,
         handleSetLyricsFontScale,
+        handleSetLyricsFontWeight,
         handleSetLyricsCustomFont,
         handleUploadLyricsCustomFont,
         handleSetAppLanguagePreference,
         handleSetLyricFilterPattern,
         handleToggleOpenPanelCloseButton,
+        handleToggleAlwaysShowPlayerBackButton,
+        handleToggleAlwaysShowMainWindowTitlebar,
         handleToggleNowPlayingStage,
         handleSetQueueAddBehavior,
         handleSetAudioOutputDeviceId: persistAudioOutputDeviceId,
@@ -418,7 +433,8 @@ export default function App() {
         tilt: tiltTuning,
         diorama: dioramaTuning,
         monet: monetTuning,
-    }), [cadenzaTuning, cappellaTuning, classicTuning, claddaghTuning, dioramaTuning, fumeTuning, monetTuning, partitaTuning, tiltTuning]);
+        pendolo: pendoloTuning,
+    }), [cadenzaTuning, cappellaTuning, classicTuning, claddaghTuning, dioramaTuning, fumeTuning, monetTuning, partitaTuning, pendoloTuning, tiltTuning]);
 
     const showPlayerChromeVisibilityModeStatus = useCallback((mode: PlayerChromeVisibilityMode) => {
         setStatusMsg({
@@ -456,8 +472,10 @@ export default function App() {
     // fresh song behaves exactly like the old reset). currentSongFullRef.current holds the live song
     // for the change handler below, so a user's correction is saved against the right track.
     useEffect(() => {
-        setLyricTimelineOffsetMs(readLyricOffset(currentSong?.id));
-    }, [currentSong?.id]);
+        const nextOffsetMs = readLyricOffset(currentSong?.id);
+        setLyricTimelineOffsetMs(nextOffsetMs);
+        lyricCurrentTime.set(-nextOffsetMs / 1000);
+    }, [currentSong?.id, lyricCurrentTime]);
 
     const handleLyricTimelineOffsetChange = useCallback((offsetMs: number) => {
         setLyricTimelineOffsetMs(offsetMs);
@@ -532,16 +550,16 @@ export default function App() {
         let shouldPauseBeforeSwitch = normalizedTargetDeviceId === 'default' || normalizedTargetDeviceId === 'communications';
 
         while (attempt <= maxRetryCount) {
-            const wasPlaying = !audioElement.paused && !audioElement.ended;
+            const wasPlaying = Boolean(audioElement && !audioElement.paused && !audioElement.ended);
             try {
-                if (shouldPauseBeforeSwitch && wasPlaying) {
+                if (audioElement && shouldPauseBeforeSwitch && wasPlaying) {
                     audioElement.pause();
                 }
 
                 await audioSinkTarget.setSinkId(normalizedTargetDeviceId);
                 persistAudioOutputDeviceId(targetDeviceId);
 
-                if (shouldPauseBeforeSwitch && wasPlaying) {
+                if (audioElement && shouldPauseBeforeSwitch && wasPlaying) {
                     try {
                         await audioElement.play();
                     } catch (resumeError) {
@@ -557,7 +575,7 @@ export default function App() {
             } catch (error) {
                 const isAbortError = error instanceof DOMException && error.name === 'AbortError';
                 if (isAbortError && attempt < maxRetryCount) {
-                    if (wasPlaying && audioElement.paused) {
+                    if (audioElement && wasPlaying && audioElement.paused) {
                         try {
                             await audioElement.play();
                         } catch {
@@ -576,7 +594,7 @@ export default function App() {
                     sinkTarget: audioSinkTarget === audioContext ? 'audio-context' : 'audio-element',
                 });
 
-                if (wasPlaying && audioElement.paused) {
+                if (audioElement && wasPlaying && audioElement.paused) {
                     try {
                         await audioElement.play();
                     } catch {
@@ -672,28 +690,13 @@ export default function App() {
         if (!currentSong) {
             return null;
         }
-        const joinedArtists = currentSong.ar?.map(artist => artist.name).filter(Boolean).join(', ');
-        if (joinedArtists) {
-            return joinedArtists;
-        }
-        const fallbackArtists = currentSong.artists?.map(artist => artist.name).filter(Boolean).join(', ');
-        if (fallbackArtists) {
-            return fallbackArtists;
-        }
-        return isLocalPlaybackSong(currentSong)
-            ? currentSong.localData.matchedArtists || currentSong.localData.artist || null
-            : null;
+        return getSongArtistLabel(currentSong) || null;
     }, [currentSong]);
     const currentSongAlbum = useMemo(() => {
         if (!currentSong) {
             return null;
         }
-        if (currentSong.al?.name || currentSong.album?.name) {
-            return currentSong.al?.name || currentSong.album?.name || null;
-        }
-        return isLocalPlaybackSong(currentSong)
-            ? currentSong.localData.matchedAlbumName || currentSong.localData.album || null
-            : null;
+        return getSongAlbumLabel(currentSong) || null;
     }, [currentSong]);
 
     // Theme Controller
@@ -770,10 +773,6 @@ export default function App() {
     // manages current view, selected items, and navigation functions across the app
     const {
         currentView,
-        overlayStack,
-        isOverlayVisible,
-        topOverlay,
-        hasOverlay,
         focusedPlaylistIndex,
         setFocusedPlaylistIndex,
         focusedFavoriteAlbumIndex,
@@ -788,14 +787,15 @@ export default function App() {
         setLocalMusicState,
         navigateToPlayer,
         navigateToHome,
+        navigateBackFromPlayer,
         navigateDirectHome,
         navigateToSearch,
         closeSearchView,
-        handlePlaylistSelect,
-        handleAlbumSelect: navigateToNeteaseAlbum,
-        handleArtistSelect: navigateToNeteaseArtist,
-        popOverlay,
+        navigateToCollection,
+        pushCollection,
+        backCollection,
     } = useAppNavigation();
+    const hasCollection = useCollectionNavigationStore(state => Boolean(state.snapshot?.stack.length));
 
     // Auto-close the player panel when leaving the player view
     useEffect(() => {
@@ -808,16 +808,17 @@ export default function App() {
         isSearchOpen,
         searchQuery,
         searchSourceTab,
+        searchReturnView,
         submitSearch,
         loadMoreSearchResults,
     } = useSearchNavigationStore(useShallow(state => ({
         isSearchOpen: state.isSearchOpen,
         searchQuery: state.searchQuery,
         searchSourceTab: state.searchSourceTab,
+        searchReturnView: state.searchReturnView,
         submitSearch: state.submitSearch,
         loadMoreSearchResults: state.loadMoreSearchResults,
     })));
-    const hideSearchOverlay = useSearchNavigationStore(state => state.hideSearchOverlay);
 
     // Netease Library Hook
     // manages user data, playlists, liked songs, and related actions
@@ -835,11 +836,126 @@ export default function App() {
         handleLogout,
         setLikedSongIds,
     } = useNeteaseLibrary({
-        currentView,
-        hasOverlay,
         setStatusMsg,
         t,
     });
+
+    const { refresh: refreshKugouLibrary } = useKugouLibrary();
+    const [isProviderSyncing, setIsProviderSyncing] = useState(false);
+    const onlineProviderRefreshers = useMemo(() => ({
+        netease: refreshUserData,
+        kugou: refreshKugouLibrary,
+    }), [refreshKugouLibrary, refreshUserData]);
+    const [providerSwitchPending, setProviderSwitchPending] = useState<{
+        nextProviderId: OnlineProviderId;
+        resolve: (confirmed: boolean) => void;
+    } | null>(null);
+
+    const prepareOnlineProviderSwitch = useCallback((_currentProviderId: OnlineProviderId, nextProviderId: OnlineProviderId): Promise<boolean> => {
+        return new Promise<boolean>((resolve) => {
+            setProviderSwitchPending(prev => {
+                prev?.resolve(false);
+                return { nextProviderId, resolve };
+            });
+        });
+    }, []);
+
+    const handleConfirmProviderSwitch = useCallback(() => {
+        if (!providerSwitchPending) return;
+        const { nextProviderId, resolve } = providerSwitchPending;
+        setProviderSwitchPending(null);
+
+        const audio = audioRef.current;
+        audio?.pause();
+        audio?.removeAttribute('src');
+        audio?.load();
+        if (audioSrc?.startsWith('blob:')) URL.revokeObjectURL(audioSrc);
+        setAudioSrc(null);
+        setCurrentSong(null);
+        setPlayQueue([]);
+        setLyrics(null);
+        setCachedCoverUrl(null);
+        setIsFmMode(false);
+        setPlayerState(PlayerState.IDLE);
+        clearPrefetchRuntime();
+        useSearchNavigationStore.getState().resetRuntime(nextProviderId);
+        useCollectionNavigationStore.getState().clear();
+
+        resolve(true);
+    }, [audioRef, audioSrc, providerSwitchPending, setLyrics]);
+
+    const handleCancelProviderSwitch = useCallback(() => {
+        if (!providerSwitchPending) return;
+        providerSwitchPending.resolve(false);
+        setProviderSwitchPending(null);
+    }, [providerSwitchPending]);
+
+    const providerSwitchConfirmDialog = useMemo(() => {
+        if (!providerSwitchPending) return null;
+        const providerLabel = omni.getProviderLabel(providerSwitchPending.nextProviderId);
+        return {
+            isOpen: true,
+            isDaylight,
+            title: t('home.switchOnlineProvider'),
+            description: t('home.confirmOnlineProviderSwitch', { provider: providerLabel }),
+            onConfirm: handleConfirmProviderSwitch,
+            onClose: handleCancelProviderSwitch,
+        };
+    }, [handleCancelProviderSwitch, handleConfirmProviderSwitch, isDaylight, providerSwitchPending, t]);
+    const onlineProviderPlatform = useOnlineProviderPlatform(onlineProviderRefreshers, prepareOnlineProviderSwitch);
+    const handleActiveProviderSyncData = useCallback(async () => {
+        const providerId = onlineProviderPlatform.activeProviderId;
+        if (providerId === 'netease') {
+            await handleSyncData();
+            return;
+        }
+
+        setIsProviderSyncing(true);
+        try {
+            const synced = await onlineProviderPlatform.refreshProvider(providerId);
+            setStatusMsg({
+                type: synced === false ? 'error' : 'success',
+                text: synced === false ? t('status.syncFailed') : t('status.dataSynced'),
+            });
+        } catch (error) {
+            console.warn('[OmniSync] Provider data sync failed', { providerId, error });
+            setStatusMsg({ type: 'error', text: t('status.syncFailed') });
+        } finally {
+            setIsProviderSyncing(false);
+        }
+    }, [handleSyncData, onlineProviderPlatform.activeProviderId, onlineProviderPlatform.refreshProvider, setStatusMsg, t]);
+    const isActiveProviderSyncing = onlineProviderPlatform.activeProviderId === 'netease'
+        ? isSyncing
+        : isProviderSyncing;
+    const refreshActiveProviderPlaylists = useCallback(
+        () => omni.refreshProviderPlaylists(onlineProviderPlatform.activeProviderId),
+        [onlineProviderPlatform.activeProviderId],
+    );
+    const lastHomeProviderRefreshRef = useRef<{ providerId: OnlineProviderId; at: number } | null>(null);
+    useEffect(() => {
+        if (currentView !== 'home' || hasCollection) return;
+
+        const providerId = onlineProviderPlatform.activeProviderId;
+        const startedAt = Date.now();
+        const previous = lastHomeProviderRefreshRef.current;
+        if (previous?.providerId === providerId && startedAt - previous.at <= HOME_PROVIDER_REFRESH_COOLDOWN_MS) return;
+        if (onlineProviderPlatform.activeProvider?.freshness === 'refreshing') {
+            lastHomeProviderRefreshRef.current = { providerId, at: startedAt };
+            return;
+        }
+
+        lastHomeProviderRefreshRef.current = { providerId, at: startedAt };
+        void refreshActiveProviderPlaylists().catch(error => {
+            if (lastHomeProviderRefreshRef.current?.providerId === providerId
+                && lastHomeProviderRefreshRef.current.at === startedAt) {
+                lastHomeProviderRefreshRef.current = null;
+            }
+            console.warn('[Omni] Failed to refresh active provider playlists on home entry', {
+                providerId,
+                name: error instanceof Error ? error.name : 'Error',
+            });
+        });
+    }, [currentView, hasCollection, onlineProviderPlatform.activeProvider?.freshness, onlineProviderPlatform.activeProviderId, refreshActiveProviderPlaylists]);
 
     const {
         stageStatus,
@@ -857,6 +973,10 @@ export default function App() {
         nowPlayingDebugInfo,
         isNowPlayingStageActive,
         isSpotifyStageActive,
+        isPlayerCapStageActive,
+        getPlayerCapDisplayTime,
+        playerCapConnectionStatus,
+        playerCapPlayers,
         mainPlaybackSnapshotRef,
         stageLyricsClockRef,
         syncStageLyricsClock,
@@ -871,10 +991,15 @@ export default function App() {
         interruptStagePlaybackForMainTransition,
         clearStagePlaybackSession,
     } = useStagePlaybackController({
-        t: (key) => t(key),
+        t: (key, options) => String(t(key, options as any)),
         isDev,
         isElectronWindow,
         enableNowPlayingStage,
+        enablePlayerCapStage,
+        playerCapHost,
+        playerCapPlayer,
+        playerCapTimeBasis,
+        playerCapSticky,
         activePlaybackContext,
         setActivePlaybackContext,
         currentSong,
@@ -934,7 +1059,7 @@ export default function App() {
     } = useElectronWindowPlaybackHandoff({
         isElectronWindow,
         audioQuality,
-        userId: user?.userId,
+        userId: user?.id,
         activePlaybackContext,
         setActivePlaybackContext,
         currentView,
@@ -987,13 +1112,6 @@ export default function App() {
         persistLastPlaybackCache,
     });
 
-    const { openCurrentNavidromeAlbum, openCurrentNavidromeArtist } = createNavidromeNavigation({
-        currentSong,
-        setPendingNavidromeSelection,
-        setHomeViewTab,
-        navigateDirectHome,
-    });
-
     const { handleDirectHomeFromPanel } = createPanelNavigation(navigateDirectHome);
 
     // --- Local Music Functions ---
@@ -1014,7 +1132,7 @@ export default function App() {
         saveCurrentQueueAsLocalPlaylist,
         addCurrentSongToLocalPlaylist,
         createCurrentLocalPlaylist,
-        addCurrentSongToNeteasePlaylist,
+        addCurrentSongToOnlinePlaylist,
         addCurrentSongToNavidromePlaylist,
         createCurrentNavidromePlaylist,
         loadCurrentSongLyricPreview,
@@ -1043,7 +1161,7 @@ export default function App() {
         lyrics: sourceLyrics,
         playQueue,
         likedSongIds,
-        userId: user?.userId,
+        userId: user?.id,
         currentTime,
         setCurrentSong,
         setLyrics,
@@ -1071,7 +1189,7 @@ export default function App() {
 
     useSessionRestoreController({
         audioQuality,
-        userId: user?.userId,
+        userId: user?.id,
         blobUrlRef,
         currentOnlineAudioUrlFetchedAtRef,
         setCurrentSong,
@@ -1088,18 +1206,16 @@ export default function App() {
         canRestoreSession: windowPlaybackHandoffRestoreStatus === 'none',
     });
 
+    const localLibraryCatalog = useLocalLibraryCatalog(localSongs);
     const {
-        openCurrentLocalAlbum,
-        openCurrentLocalArtist,
         openLocalAlbumByName,
         openLocalArtistByName,
     } = createLocalLibraryNavigation({
-        currentView,
         currentSong,
         localSongs,
+        localLibraryCatalog,
         setHomeViewTab,
-        setLocalMusicState,
-        navigateDirectHome,
+        onOpenCollection: collection => navigateToCollection(collection, 'home'),
         t,
     });
     const handleSaveLyricFilterPattern = createLyricFilterPatternSaver({
@@ -1126,17 +1242,16 @@ export default function App() {
         pendingUnavailableReplacement,
         setPendingUnavailableReplacement,
         clearPendingUnavailableSkip,
-        addNeteaseSongToQueue,
-        addNeteaseSongsToQueue,
+        addOnlineSongToQueue,
+        addOnlineSongsToQueue,
         playSong,
         playOnlineQueueFromStart,
         handleQueueAddAndPlay,
         handleSearchOverlaySubmit,
         handleSearchLoadMore,
         handleSearchResultPlay,
+        handleSearchResultAddToQueue,
         handleUnavailableReplacementConfirm,
-        handleSearchResultArtistSelect,
-        handleSearchResultAlbumSelect,
         handleNextTrack,
         handlePrevTrack,
         skipAfterPlaybackFailure,
@@ -1157,8 +1272,10 @@ export default function App() {
         queueAddBehavior,
         searchQuery,
         searchSourceTab,
+        searchReturnView,
         localSongs,
-        userId: user?.userId,
+        localLibraryCatalog,
+        userId: user?.id,
         currentTime,
         setCurrentSong,
         setLyrics,
@@ -1175,18 +1292,13 @@ export default function App() {
         setIsPanelOpen,
         navigateToPlayer,
         navigateToSearch,
-        hideSearchOverlay,
-        setHomeViewTab,
-        setPendingNavidromeSelection,
-        handleArtistSelect: navigateToNeteaseArtist,
-        handleAlbumSelect: navigateToNeteaseAlbum,
-        openLocalArtistByName,
-        openLocalAlbumByName,
         persistLastPlaybackCache,
         restoreCachedThemeForSong,
         interruptStagePlaybackForMainTransition,
         onPlayLocalSong,
         onPlayNavidromeSong,
+        onAddLocalSongToQueue: handleLocalQueueAdd,
+        onAddNavidromeSongsToQueue: addNavidromeSongsToQueue,
         searchDeps: {
             submitSearch,
             loadMoreSearchResults,
@@ -1204,6 +1316,40 @@ export default function App() {
         currentOnlineAudioUrlFetchedAtRef,
         lastAudioRecoverySourceRef,
     });
+    const handleSearchResultArtistOpen = useCallback(async (
+        track: UnifiedSong,
+        artistName: string,
+        artistId?: MediaId,
+        entityId?: string,
+    ) => {
+        try {
+            const collection = await createSearchArtistCollection(track, artistName, artistId, entityId);
+            if (collection) {
+                navigateToCollection(collection, 'search');
+                return;
+            }
+        } catch (error) {
+            console.warn('[CatalogNavigation] Failed to resolve artist:', error);
+        }
+        setStatusMsg({ type: 'error', text: t('search.catalogUnavailable') });
+    }, [navigateToCollection, setStatusMsg, t]);
+    const handleSearchResultAlbumOpen = useCallback(async (
+        track: UnifiedSong,
+        albumName: string,
+        albumId?: MediaId,
+        entityId?: string,
+    ) => {
+        try {
+            const collection = await createSearchAlbumCollection(track, albumName, albumId, entityId);
+            if (collection) {
+                navigateToCollection(collection, 'search');
+                return;
+            }
+        } catch (error) {
+            console.warn('[CatalogNavigation] Failed to resolve album:', error);
+        }
+        setStatusMsg({ type: 'error', text: t('search.catalogUnavailable') });
+    }, [navigateToCollection, setStatusMsg, t]);
 
     usePlaybackUiEffects({
         statusMsg,
@@ -1223,6 +1369,7 @@ export default function App() {
         audioRef,
         audioSrc,
         currentSong,
+        localSongs,
         isLyricsLoading,
         enableMediaCache,
         isPanelOpen,
@@ -1386,7 +1533,7 @@ export default function App() {
                 const navidromeSong = resolveNavidromePlaybackCarrier(currentSong);
                 return navidromeSong ? starredNavidromeSongIds.has(navidromeSong.navidromeData.id) : false;
             }
-            return likedSongIds.has(currentSong.id);
+            return omni.isSongLiked(currentSong, likedSongIds);
         })(),
         onLike: handleLike,
     });
@@ -1404,6 +1551,7 @@ export default function App() {
         duration,
         effectiveLoopMode,
         isNowPlayingStageActive,
+        isPlayerCapStageActive,
         stageActiveEntryKind,
         stageLyricsSession,
         stageLyricsClockRef,
@@ -1412,6 +1560,7 @@ export default function App() {
         getSyntheticStageLyricsTime,
         syncStageLyricsClock,
         getNowPlayingDisplayTime,
+        getPlayerCapDisplayTime,
         syncNowPlayingClock,
         lyricTimelineOffsetMs,
         lyricCurrentTime,
@@ -1469,10 +1618,12 @@ export default function App() {
         appStyle,
         theme,
         lyricsFontStyle,
+        lyricsFontWeight,
         lyricsCustomFontFamily,
         lyricsFontFallbackFamilies,
         subtitleFontInheritsLyrics,
         subtitleFontStyle,
+        subtitleFontWeight,
         subtitleFontFamily,
         subtitleFontFallbackFamilies,
         currentSongId: currentSong?.id,
@@ -1483,14 +1634,16 @@ export default function App() {
         lyricsCustomFontFamily,
         lyricsFontFallbackFamilies,
         lyricsFontStyle,
+        lyricsFontWeight,
         subtitleFontFallbackFamilies,
         subtitleFontFamily,
         subtitleFontInheritsLyrics,
         subtitleFontStyle,
+        subtitleFontWeight,
         theme,
         visualizerMode,
     ]);
-    const isNowPlayingControlDisabled = isNowPlayingStageActive && !isSpotifyStageActive;
+    const isNowPlayingControlDisabled = (isNowPlayingStageActive && !isSpotifyStageActive) || isPlayerCapStageActive;
 
     useEffect(() => {
         localStorage.setItem(PLAYER_CHROME_HIDDEN_STORAGE_KEY, String(isPlayerChromeHidden));
@@ -1628,6 +1781,35 @@ export default function App() {
         isSpotifyStageActive,
         stageActiveEntryKind,
     ]);
+    const visualizerBackgroundConfig = useMemo<VisualizerBackgroundConfig>(() => ({
+        mode: visualizerBackgroundMode,
+        common: {
+            useCoverColorBg,
+            opacity: backgroundOpacity,
+            disableGeometricBackground: disableVisualizerGeometricBackground,
+            disableVignette: disableVisualizerVignette,
+        },
+        customImage: monetBackgroundImage,
+        monet: { tuning: monetBackgroundTuning },
+        nomand: { tuning: nomandBackgroundTuning },
+        latent: { tuning: latentBackgroundTuning },
+        url: {
+            items: urlBackgroundList,
+            selectedId: urlBackgroundSelectedId,
+        },
+    }), [
+        backgroundOpacity,
+        disableVisualizerGeometricBackground,
+        disableVisualizerVignette,
+        monetBackgroundImage,
+        monetBackgroundTuning,
+        nomandBackgroundTuning,
+        latentBackgroundTuning,
+        urlBackgroundList,
+        urlBackgroundSelectedId,
+        useCoverColorBg,
+        visualizerBackgroundMode,
+    ]);
     const isSettingsModalOpen = settingsModalState.isOpen;
     const {
         obsBrowserSourceStatus,
@@ -1649,28 +1831,25 @@ export default function App() {
         isDaylight,
         visualizerMode,
         visualizerTunings,
-        visualizerBackgroundMode,
+        background: {
+            ...visualizerBackgroundConfig,
+            transparent: isPlayerPageTransparent,
+        },
         lyricsFontScale,
-        backgroundOpacity,
+        subtitleFontScale,
         visualizerOpacity,
         subtitleOverlayOpacity,
-        transparentBackground: isPlayerPageTransparent,
-        useCoverColorBg,
+        subtitleOverlayBackground,
         staticMode,
-        disableGeometricBackground: disableVisualizerGeometricBackground,
-        disableVignette: disableVisualizerVignette,
         hideTranslationSubtitle: shouldHidePlayerTranslationSubtitle,
         showSubtitleTranslation,
+        subtitleContentMode,
         seed: visualizerGeometrySeed,
         audioPower,
         audioBands,
         cappellaCustomEmojiImages,
         cappellaCustomAvatarImages,
-        monetBackgroundTuning,
-        monetBackgroundImage,
         monetPortraitImage,
-        urlBackgroundList,
-        urlBackgroundSelectedId,
     });
     const canGenerateAITheme = Boolean((sourceLyrics?.lines.length ?? 0) > 0 || currentSong?.isPureMusic);
     const generateCurrentSongTheme = useCallback(() => {
@@ -1679,18 +1858,11 @@ export default function App() {
     const toggleDaylightMode = useCallback(() => {
         handleToggleDaylight(!isDaylight);
     }, [handleToggleDaylight, isDaylight]);
-    const currentSearchSourceTabInPalette = useMemo(() => {
-        if (currentSong) {
-            if (isLocalPlaybackSong(currentSong)) {
-                return 'local';
-            }
-            if (isNavidromePlaybackSong(currentSong)) {
-                return 'navidrome';
-            }
-            return 'playlist';
-        }
-        return searchSourceTab;
-    }, [currentSong, searchSourceTab]);
+    const currentSearchSourceTabInPalette = useMemo(() => resolveCommandPaletteSearchSource(
+        currentSong,
+        searchSourceTab,
+        onlineProviderPlatform.activeProviderId,
+    ), [currentSong, onlineProviderPlatform.activeProviderId, searchSourceTab]);
     const toggleBrowserFullscreen = useCallback(async () => {
         if (typeof window !== 'undefined' && window.electron?.toggleFullscreenWindow) {
             return window.electron.toggleFullscreenWindow();
@@ -1732,6 +1904,7 @@ export default function App() {
     const commandPaletteContext = useMemo(() => ({
         currentSearchSourceTab: currentSearchSourceTabInPalette,
         localSongs,
+        localLibraryCatalog,
         playerState,
         t: (key: string, fallback?: string) => t(key, fallback ?? ''),
         setStatusMsg,
@@ -1763,6 +1936,7 @@ export default function App() {
         },
         setVisualizerBackgroundMode: handleSetVisualizerBackgroundMode,
         setMonetBackgroundTuning: handleSetMonetBackgroundTuning,
+        setLatentBackgroundTuning: handleSetLatentBackgroundTuning,
         toggleTransparentBackground: () => {
             void toggleTransparentModeWithHandoff(!transparentPlayerBackground);
         },
@@ -1771,9 +1945,21 @@ export default function App() {
         toggleBottomSubtitleOverlay: () => {
             handleToggleHidePlayerTranslationSubtitle(!hidePlayerTranslationSubtitle);
         },
-        showSubtitleTranslation,
-        toggleSubtitleTranslation: () => {
-            handleToggleShowSubtitleTranslation(!showSubtitleTranslation);
+        subtitleContentMode,
+        cycleSubtitleContentMode: () => {
+            handleSetSubtitleContentMode(subtitleContentMode === 'translation' ? 'romanization' : 'translation');
+        },
+        subtitleOverlayBackground,
+        toggleSubtitleOverlayBackground: () => {
+            handleToggleSubtitleOverlayBackground(!subtitleOverlayBackground);
+        },
+        alwaysShowPlayerBackButton,
+        toggleAlwaysShowPlayerBackButton: () => {
+            handleToggleAlwaysShowPlayerBackButton(!alwaysShowPlayerBackButton);
+        },
+        alwaysShowMainWindowTitlebar,
+        toggleAlwaysShowMainWindowTitlebar: () => {
+            handleToggleAlwaysShowMainWindowTitlebar(!alwaysShowMainWindowTitlebar);
         },
         convertSimplifiedLyricsToTraditional,
         toggleSimplifiedLyricsToTraditional: () => {
@@ -1781,14 +1967,17 @@ export default function App() {
         },
         enablePlayerPageNativeBlur,
         toggleDaylightMode,
+        voiceInputPauseEnabled,
+        voiceInputPauseSupported: isElectronWindow && typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('win'),
+        toggleVoiceInputPause: () => {
+            handleToggleVoiceInputPause(!voiceInputPauseEnabled);
+        },
         setAppLanguagePreference: handleSetAppLanguagePreference,
-        enableAlternativeLyricSources,
         runAutoMatchBestLyric: handleAutoMatchBestLyricForCurrentSong,
         setIsUserGuideModalOpen,
         openThemeQuickEditor,
         canOpenThemeQuickEditor,
     }), [
-        enableAlternativeLyricSources,
         enablePlayerPageNativeBlur,
         generateCurrentSongTheme,
         handleAutoMatchBestLyricForCurrentSong,
@@ -1800,10 +1989,10 @@ export default function App() {
         handleSetVisualizerBackgroundMode,
         handleSetMonetBackgroundTuning,
         handleToggleHidePlayerTranslationSubtitle,
-        handleToggleShowSubtitleTranslation,
-        handleToggleConvertSimplifiedLyricsToTraditional,
+        handleSetSubtitleContentMode,
         hidePlayerTranslationSubtitle,
         isGeneratingTheme,
+        localLibraryCatalog,
         localSongs,
         navigateToHome,
         navigateToPlayer,
@@ -1814,6 +2003,7 @@ export default function App() {
         playerState,
         randomVisualizerModePerSong,
         canGenerateAITheme,
+        convertSimplifiedLyricsToTraditional,
         currentSearchSourceTabInPalette,
         setHomeViewTab,
         shuffleQueue,
@@ -1827,9 +2017,17 @@ export default function App() {
         transparentPlayerBackground,
         toggleTransparentModeWithHandoff,
         toggleDaylightMode,
-        showSubtitleTranslation,
-        convertSimplifiedLyricsToTraditional,
-        handleToggleAlternativeLyricSources,
+        voiceInputPauseEnabled,
+        handleToggleVoiceInputPause,
+
+        subtitleContentMode,
+        subtitleOverlayBackground,
+        handleToggleSubtitleOverlayBackground,
+        handleToggleAlwaysShowPlayerBackButton,
+        handleToggleAlwaysShowMainWindowTitlebar,
+        handleToggleConvertSimplifiedLyricsToTraditional,
+        alwaysShowPlayerBackButton,
+        alwaysShowMainWindowTitlebar,
         setIsUserGuideModalOpen,
         openThemeQuickEditor,
         canOpenThemeQuickEditor,
@@ -1877,10 +2075,7 @@ export default function App() {
         if (bgMode === 'ai') {
             return aiTheme ?? FALLBACK_AI_DUAL_THEME;
         }
-        return {
-            light: DAYLIGHT_THEME,
-            dark: DEFAULT_THEME,
-        };
+        return BASE_DUAL_THEME;
     }, [bgMode, customTheme, aiTheme]);
 
     const devDebugSnapshot = useMemo(() => (
@@ -1971,68 +2166,77 @@ export default function App() {
         syncStageLyricsClock,
     ]);
 
-    const handleUnifiedAlbumSelect = useCallback((albumId: number) => {
-        if (homeLayoutStyle === 'grid') {
-            setActiveGridViewCollection({
-                source: 'netease',
-                id: albumId,
-                type: 'album',
-                name: t('home.albums'),
-            });
-            navigateDirectHome({ clearContext: false });
-        } else {
-            navigateToNeteaseAlbum(albumId);
-        }
-    }, [homeLayoutStyle, navigateToNeteaseAlbum, navigateDirectHome, setActiveGridViewCollection]);
+    const handlePlaylistSelect = useCallback((playlist: ProviderCollection) => {
+        navigateToCollection(createOnlineGridViewCollection({
+            ...playlist,
+            type: playlist.type || 'playlist',
+        }, playlist.providerId || 'netease'), 'home');
+    }, [navigateToCollection]);
 
-    const handleUnifiedArtistSelect = useCallback((artistId: number) => {
-        if (homeLayoutStyle === 'grid') {
-            setActiveGridViewCollection({
-                source: 'netease',
-                id: artistId,
-                type: 'artist',
-                name: t('navidrome.artists'),
-            });
-            navigateDirectHome({ clearContext: false });
-        } else {
-            navigateToNeteaseArtist(artistId);
-        }
-    }, [homeLayoutStyle, navigateToNeteaseArtist, navigateDirectHome, setActiveGridViewCollection]);
+    const handleUnifiedAlbumSelect = useCallback((albumId: MediaId) => {
+        navigateToCollection({
+            source: 'online',
+            providerId: 'netease',
+            id: albumId,
+            type: 'album',
+            name: t('home.albums'),
+        }, 'home');
+    }, [navigateToCollection, t]);
 
-    const handlePlayerPanelAlbumSelect = useCallback((albumId: number) => {
-        if (homeLayoutStyle === 'grid') {
-            setActiveGridViewCollection({
-                source: 'netease',
-                id: albumId,
-                type: 'album',
-                name: t('home.albums'),
-                returnToPlayerOnClose: true,
-            });
-            navigateDirectHome({ clearContext: false });
-        } else {
-            navigateToNeteaseAlbum(albumId);
-        }
-    }, [homeLayoutStyle, navigateToNeteaseAlbum, navigateDirectHome, setActiveGridViewCollection]);
+    const handleUnifiedArtistSelect = useCallback((artistId: MediaId) => {
+        navigateToCollection({
+            source: 'online',
+            providerId: 'netease',
+            id: artistId,
+            type: 'artist',
+            name: t('navidrome.artists'),
+        }, 'home');
+    }, [navigateToCollection, t]);
 
-    const handlePlayerPanelArtistSelect = useCallback((artistId: number) => {
-        if (homeLayoutStyle === 'grid') {
-            setActiveGridViewCollection({
-                source: 'netease',
-                id: artistId,
-                type: 'artist',
-                name: t('navidrome.artists'),
-                returnToPlayerOnClose: true,
-            });
-            navigateDirectHome({ clearContext: false });
-        } else {
-            navigateToNeteaseArtist(artistId);
+    const handlePlayerPanelAlbumSelect = useCallback(async (song: SongResult, album: Album) => {
+        try {
+            const ref = await resolveSongCatalogRef(song as UnifiedSong, 'album', album);
+            if (ref) {
+                navigateToCollection({
+                    source: 'online',
+                    providerId: ref.providerId,
+                    id: ref.id,
+                    type: 'album',
+                    name: album.name || t('home.albums'),
+                    coverUrl: album.coverUrl,
+                }, 'player');
+                return;
+            }
+        } catch (error) {
+            console.warn('[CatalogNavigation] Failed to resolve player album:', error);
         }
-    }, [homeLayoutStyle, navigateToNeteaseArtist, navigateDirectHome, setActiveGridViewCollection]);
+        setStatusMsg({ type: 'error', text: t('search.catalogUnavailable') });
+    }, [navigateToCollection, setStatusMsg, t]);
+
+    const handlePlayerPanelArtistSelect = useCallback(async (song: SongResult, artist: Artist) => {
+        try {
+            const ref = await resolveSongCatalogRef(song as UnifiedSong, 'artist', artist);
+            if (ref) {
+                navigateToCollection({
+                    source: 'online',
+                    providerId: ref.providerId,
+                    id: ref.id,
+                    type: 'artist',
+                    name: artist.name || t('navidrome.artists'),
+                }, 'player');
+                return;
+            }
+        } catch (error) {
+            console.warn('[CatalogNavigation] Failed to resolve player artist:', error);
+        }
+        setStatusMsg({ type: 'error', text: t('search.catalogUnavailable') });
+    }, [navigateToCollection, setStatusMsg, t]);
 
     const homeModel = useMemo(() => buildHomeModel({
+        onlineProviderPlatform,
         playSong,
         navigateToPlayer,
-        refreshUserData,
+        refreshOnlineProviderPlaylists: refreshActiveProviderPlaylists,
         user,
         playlists,
         cloudPlaylist,
@@ -2052,6 +2256,7 @@ export default function App() {
         openLocalAlbumByName,
         openLocalArtistByName,
         localSongs,
+        localLibraryCatalog,
         localPlaylists,
         onRefreshLocalSongs,
         onPlayLocalSong,
@@ -2078,14 +2283,17 @@ export default function App() {
         theme,
         navidromeEnabled,
         playAll: playOnlineQueueFromStart,
-        addAllToQueue: addNeteaseSongsToQueue,
-        addSongToQueue: addNeteaseSongToQueue,
+        addAllToQueue: addOnlineSongsToQueue,
+        addSongToQueue: addOnlineSongToQueue,
         onStatusMessage: setStatusMsg,
+        onOpenCollection: collection => navigateToCollection(collection, 'home'),
+        onPushCollection: pushCollection,
+        onBackCollection: backCollection,
     }), [
         activePlaybackContext,
         addNavidromeSongsToQueue,
-        addNeteaseSongsToQueue,
-        addNeteaseSongToQueue,
+        addOnlineSongsToQueue,
+        addOnlineSongToQueue,
         playOnlineQueueFromStart,
         applyCustomTheme,
         applyDefaultTheme,
@@ -2108,8 +2316,6 @@ export default function App() {
         focusedPlaylistIndex,
         focusedRadioIndex,
         fumeTuning,
-        navigateToNeteaseAlbum,
-        navigateToNeteaseArtist,
         handleClearCustomCappellaEmojiPack,
         handleCustomThemePreferenceChange,
         handleHomeMatchSong,
@@ -2123,6 +2329,7 @@ export default function App() {
         handleSetFumeTuning,
         handleSetLyricsCustomFont,
         handleSetLyricsFontScale,
+        handleSetLyricsFontWeight,
         handleSetLyricsFontStyle,
         handleUploadLyricsCustomFont,
         handleSetPartitaTuning,
@@ -2165,6 +2372,7 @@ export default function App() {
         lyricsCustomFontFamily,
         lyricsCustomFontLabel,
         lyricsFontScale,
+        lyricsFontWeight,
         lyricsFontStyle,
         navigateToPlayer,
         navigateToSearch,
@@ -2174,6 +2382,7 @@ export default function App() {
         onPlayLocalSong,
         onPlayNavidromeSong,
         onRefreshLocalSongs,
+        onlineProviderPlatform,
         openSettings,
         openLocalAlbumByName,
         openLocalArtistByName,
@@ -2185,7 +2394,7 @@ export default function App() {
         playSong,
         queueAddBehavior,
         audioOutputDeviceId,
-        refreshUserData,
+        refreshActiveProviderPlaylists,
         saveCustomDualTheme,
         setFocusedFavoriteAlbumIndex,
         setFocusedPlaylistIndex,
@@ -2211,6 +2420,22 @@ export default function App() {
         hideTaskbarIcon,
         openPlayerOnLaunch,
     ]);
+    const playerDisplayCatalogIndex = useMemo(() => buildLocalLibraryIndex(
+        localLibraryCatalog.entities,
+        localLibraryCatalog.assignments,
+    ), [localLibraryCatalog.assignments, localLibraryCatalog.entities]);
+    const playerDisplayCurrentSong = useMemo(() => (
+        currentSong
+            ? applyLocalLibraryEntityDisplay(currentSong, localLibraryCatalog, playerDisplayCatalogIndex)
+            : null
+    ), [currentSong, localLibraryCatalog, playerDisplayCatalogIndex]);
+    const playerDisplayQueue = useMemo(() => (
+        playQueue.map(song => applyLocalLibraryEntityDisplay(song, localLibraryCatalog, playerDisplayCatalogIndex))
+    ), [localLibraryCatalog, playQueue, playerDisplayCatalogIndex]);
+    const onlinePlaylists = useMemo(() => {
+        return playerDisplayCurrentSong ? omni.getPlaylistsForSong(playerDisplayCurrentSong) : [];
+    }, [onlineProviderPlatform.providers, playerDisplayCurrentSong]);
+
     const playerPanelModel = useMemo(() => buildPlayerPanelModel({
         isPanelOpen,
         setIsPanelOpen,
@@ -2219,7 +2444,7 @@ export default function App() {
         navigateToHome,
         handleDirectHomeFromPanel,
         coverUrl,
-        currentSong,
+        currentSong: playerDisplayCurrentSong,
         handleAlbumSelect: handlePlayerPanelAlbumSelect,
         handleArtistSelect: handlePlayerPanelArtistSelect,
         effectiveLoopMode,
@@ -2234,7 +2459,7 @@ export default function App() {
                 const navidromeSong = resolveNavidromePlaybackCarrier(currentSong);
                 return navidromeSong ? starredNavidromeSongIds.has(navidromeSong.navidromeData.id) : false;
             }
-            return likedSongIds.has(currentSong.id);
+            return omni.isSongLiked(currentSong, likedSongIds);
         })(),
         generateAITheme: generateCurrentSongTheme,
         isGeneratingTheme,
@@ -2281,7 +2506,7 @@ export default function App() {
         openSettings,
         openCommandPalette: commandPalette.open,
         isCommandPaletteOpen: commandPalette.isOpen,
-        playQueue,
+        playQueue: playerDisplayQueue,
         playSong,
         queueScrollRef,
         shuffleQueue,
@@ -2289,112 +2514,114 @@ export default function App() {
         moveQueueSongToEnd,
         moveQueueSongToNext,
         localPlaylists,
-        playlists,
+        onlinePlaylists,
         saveCurrentQueueAsLocalPlaylist,
         addCurrentSongToLocalPlaylist,
         createCurrentLocalPlaylist,
-        addCurrentSongToNeteasePlaylist,
+        addCurrentSongToOnlinePlaylist,
         addCurrentSongToNavidromePlaylist,
         createCurrentNavidromePlaylist,
         openCurrentLocalAlbum: () => {
-            if (homeLayoutStyle === 'grid') {
-                if (currentSong && isLocalPlaybackSong(currentSong) && currentSong.localData) {
-                    const localSong = currentSong.localData;
-                    const albumName = currentSong.al?.name || currentSong.album?.name || localSong.matchedAlbumName || localSong.album;
-                    if (albumName) {
-                        const songs = localSongs.filter(song => {
-                            const candidateAlbum = song.matchedAlbumName || song.album || '';
-                            return candidateAlbum === albumName;
-                        });
-                        if (songs.length > 0) {
-                            setActiveGridViewCollection({
-                                source: 'local',
-                                id: `album-current-${albumName}`,
-                                name: albumName,
-                                type: 'album',
-                                coverUrl: currentSong.al?.picUrl || currentSong.album?.picUrl || undefined,
-                                description: currentSong.ar?.map(artist => artist.name).join(', '),
-                                trackCount: songs.length,
-                                songIds: songs.map(song => song.id),
-                                returnToPlayerOnClose: true,
-                            });
-                            navigateDirectHome({ clearContext: false });
-                        }
+            if (currentSong && isLocalPlaybackSong(currentSong)) {
+                const catalogIndex = buildLocalLibraryIndex(
+                    localLibraryCatalog.entities,
+                    localLibraryCatalog.assignments,
+                );
+                const assignment = catalogIndex.assignmentsBySongId.get(currentSong.localRef.songId);
+                const albumEntityId = assignment?.albumEntityId
+                    ? followEntityRedirect(assignment.albumEntityId, catalogIndex.entitiesById)
+                    : undefined;
+                const albumEntity = albumEntityId
+                    ? catalogIndex.entitiesById.get(albumEntityId)
+                    : undefined;
+                if (albumEntity?.kind === 'album') {
+                    const memberIds = new Set(localLibraryCatalog.assignments
+                        .filter(item => item.albumEntityId && (
+                            followEntityRedirect(item.albumEntityId, catalogIndex.entitiesById) === albumEntity.id
+                        ))
+                        .map(item => item.songId));
+                    const songs = localSongs.filter(song => memberIds.has(song.id));
+                    if (songs.length > 0) {
+                        navigateToCollection({
+                            source: 'local',
+                            id: albumEntity.id,
+                            entityId: albumEntity.id,
+                            name: albumEntity.displayName,
+                            type: 'album',
+                            coverUrl: getSongCoverUrl(playerDisplayCurrentSong),
+                            description: getSongArtistLabel(playerDisplayCurrentSong),
+                            trackCount: songs.length,
+                            songIds: songs.map(song => song.id),
+                        }, 'player');
                     }
                 }
-            } else {
-                openCurrentLocalAlbum();
             }
         },
-        openCurrentLocalArtist: () => {
-            if (homeLayoutStyle === 'grid') {
-                if (currentSong && isLocalPlaybackSong(currentSong) && currentSong.localData) {
-                    const artistName = currentSong.ar?.[0]?.name || currentSong.artists?.[0]?.name || currentSong.localData.matchedArtists || currentSong.localData.artist;
-                    if (artistName) {
-                        const songs = localSongs.filter(song => {
-                            const candidateArtist = song.matchedArtists || song.artist || '';
-                            return candidateArtist === artistName;
-                        });
-                        if (songs.length > 0) {
-                            setActiveGridViewCollection({
-                                source: 'local',
-                                id: `artist-current-${artistName}`,
-                                name: artistName,
-                                type: 'artist',
-                                coverUrl: currentSong.al?.picUrl || currentSong.album?.picUrl || undefined,
-                                description: `${songs.length} ${t('home.songs')}`,
-                                trackCount: songs.length,
-                                songIds: songs.map(song => song.id),
-                                returnToPlayerOnClose: true,
-                            });
-                            navigateDirectHome({ clearContext: false });
-                        }
+        openCurrentLocalArtist: (requestedEntityId?: string) => {
+            if (currentSong && isLocalPlaybackSong(currentSong)) {
+                const catalogIndex = buildLocalLibraryIndex(
+                    localLibraryCatalog.entities,
+                    localLibraryCatalog.assignments,
+                );
+                const assignment = catalogIndex.assignmentsBySongId.get(currentSong.localRef.songId);
+                const sourceEntityId = requestedEntityId || assignment?.artistEntityIds[0];
+                const artistEntityId = sourceEntityId
+                    ? followEntityRedirect(sourceEntityId, catalogIndex.entitiesById)
+                    : undefined;
+                const artistEntity = artistEntityId
+                    ? catalogIndex.entitiesById.get(artistEntityId)
+                    : undefined;
+                if (artistEntity?.kind === 'artist') {
+                    const memberIds = new Set(localLibraryCatalog.assignments
+                        .filter(item => item.artistEntityIds.some(entityId => (
+                            followEntityRedirect(entityId, catalogIndex.entitiesById) === artistEntity.id
+                        )))
+                        .map(item => item.songId));
+                    const songs = localSongs.filter(song => memberIds.has(song.id));
+                    if (songs.length > 0) {
+                        navigateToCollection({
+                            source: 'local',
+                            id: artistEntity.id,
+                            entityId: artistEntity.id,
+                            name: artistEntity.displayName,
+                            type: 'artist',
+                            coverUrl: getSongCoverUrl(currentSong),
+                            description: `${songs.length} ${t('home.songs')}`,
+                            trackCount: songs.length,
+                            songIds: songs.map(song => song.id),
+                        }, 'player');
                     }
                 }
-            } else {
-                openCurrentLocalArtist();
             }
         },
         openCurrentNavidromeAlbum: () => {
-            if (homeLayoutStyle === 'grid') {
-                const currentNavidromeSong = (currentSong as any)?.navidromeData;
-                const playbackCarrier = currentNavidromeSong?.navidromeData;
-                const albumId = currentNavidromeSong?.albumId || playbackCarrier?.albumId;
-                if (albumId) {
-                    const albumName = currentSong?.al?.name || currentSong?.album?.name || t('localMusic.unknownAlbum');
-                    setActiveGridViewCollection({
-                        source: 'navidrome',
-                        id: albumId,
-                        name: albumName,
-                        type: 'album',
-                        coverUrl: currentSong?.al?.picUrl || currentSong?.album?.picUrl || undefined,
-                        returnToPlayerOnClose: true,
-                    });
-                    navigateDirectHome({ clearContext: false });
-                }
-            } else {
-                openCurrentNavidromeAlbum();
+            const currentNavidromeSong = (currentSong as any)?.navidromeData;
+            const playbackCarrier = currentNavidromeSong?.navidromeData;
+            const albumId = currentNavidromeSong?.albumId || playbackCarrier?.albumId;
+            if (albumId) {
+                const albumName = getSongAlbumLabel(currentSong) || t('localMusic.unknownAlbum');
+                navigateToCollection({
+                    source: 'navidrome',
+                    id: albumId,
+                    name: albumName,
+                    type: 'album',
+                    coverUrl: getSongCoverUrl(currentSong),
+                }, 'player');
             }
         },
         openCurrentNavidromeArtist: () => {
-            if (homeLayoutStyle === 'grid') {
-                const currentNavidromeSong = (currentSong as any)?.navidromeData;
-                const playbackCarrier = currentNavidromeSong?.navidromeData;
-                const artistId = currentNavidromeSong?.artistId || playbackCarrier?.artistId;
-                if (artistId) {
-                    const artistName = currentSong?.ar?.[0]?.name || currentSong?.artists?.[0]?.name || t('localMusic.unknownArtist');
-                    setActiveGridViewCollection({
-                        source: 'navidrome',
-                        id: artistId,
-                        name: artistName,
-                        type: 'artist',
-                        coverUrl: currentSong?.al?.picUrl || currentSong?.album?.picUrl || undefined,
-                        returnToPlayerOnClose: true,
-                    });
-                    navigateDirectHome({ clearContext: false });
-                }
-            } else {
-                openCurrentNavidromeArtist();
+            const currentNavidromeSong = (currentSong as any)?.navidromeData;
+            const playbackCarrier = currentNavidromeSong?.navidromeData;
+            const artistId = currentNavidromeSong?.artistId || playbackCarrier?.artistId;
+            if (artistId) {
+                const artistName = getSongArtistLabel(currentSong).split(',')[0]?.trim() || t('localMusic.unknownArtist');
+                navigateToCollection({
+                    source: 'navidrome',
+                    id: artistId,
+                    name: artistName,
+                    type: 'artist',
+                    coverUrl: getSongCoverUrl(currentSong),
+                }, 'player');
             }
         },
         handleCopySongInfoSuccess: createCopySongInfoSuccessHandler({ setStatusMsg, t }),
@@ -2404,8 +2631,8 @@ export default function App() {
         setAudioQuality,
         cacheSize,
         handleClearCache,
-        handleSyncData,
-        isSyncing,
+        handleSyncData: handleActiveProviderSyncData,
+        isSyncing: isActiveProviderSyncing,
         useCoverColorBg,
         handleToggleCoverColorBg,
         isDaylight,
@@ -2414,7 +2641,7 @@ export default function App() {
         activePlaybackContext,
         addCurrentSongToLocalPlaylist,
         addCurrentSongToNavidromePlaylist,
-        addCurrentSongToNeteasePlaylist,
+        addCurrentSongToOnlinePlaylist,
         audioQuality,
         cacheSize,
         canGenerateAITheme,
@@ -2424,11 +2651,11 @@ export default function App() {
         createCurrentLocalPlaylist,
         createCurrentNavidromePlaylist,
         currentSong,
+        playerDisplayCurrentSong,
+        playerDisplayQueue,
         effectiveLoopMode,
         generateCurrentSongTheme,
-        navigateToNeteaseAlbum,
-        navigateToNeteaseArtist,
-        localSongs,
+        localLibraryCatalog,
         handleBgModeChange,
         handleChangeOnlineLyricsSource,
         handleChangeLyricsSource,
@@ -2444,7 +2671,7 @@ export default function App() {
         handleResetTheme,
         handleSetVisualizerMode,
         handleSetVolume,
-        handleSyncData,
+        handleActiveProviderSyncData,
         handleToggleCoverColorBg,
         handleToggleMute,
         handleToggleDaylight,
@@ -2456,23 +2683,19 @@ export default function App() {
         isMuted,
         isNowPlayingControlDisabled,
         isPanelOpen,
-        isSyncing,
+        isActiveProviderSyncing,
         likedSongIds,
+        onlineProviderPlatform.providers,
+        onlinePlaylists,
         starredNavidromeSongIds,
         localPlaylists,
         lyrics,
         lyricTimelineOffsetMs,
         navigateToHome,
         openSettings,
-        openCurrentLocalAlbum,
-        openCurrentLocalArtist,
-        openCurrentNavidromeAlbum,
-        openCurrentNavidromeArtist,
         panelTab,
-        playQueue,
         playSong,
         playerState,
-        playlists,
         queueScrollRef,
         replayGainMode,
         saveCurrentQueueAsLocalPlaylist,
@@ -2495,7 +2718,6 @@ export default function App() {
         visualizerMode,
         volume,
         homeLayoutStyle,
-        setActiveGridViewCollection,
         localSongs,
         handlePlayerPanelAlbumSelect,
         handlePlayerPanelArtistSelect,
@@ -2503,28 +2725,16 @@ export default function App() {
     ]);
     const appOverlaysModel = useMemo(() => buildAppOverlaysModel({
         currentView,
-        isOverlayVisible,
         isSearchOpen,
-        topOverlay,
-        overlayStack,
         theme,
         isDaylight,
         closeSearchView,
         handleSearchOverlaySubmit,
         handleSearchLoadMore,
         handleSearchResultPlay,
-        handleSearchResultArtistSelect,
-        handleSearchResultAlbumSelect,
-        popOverlay,
-        playSong,
-        playOnlineQueueFromStart,
-        addNeteaseSongsToQueue,
-        addNeteaseSongToQueue,
-        handleAlbumSelect: handleUnifiedAlbumSelect,
-        handleArtistSelect: handleUnifiedArtistSelect,
-        userId: user?.userId,
-        playlists,
-        refreshUserData,
+        handleSearchResultAddToQueue,
+        handleSearchResultArtistOpen,
+        handleSearchResultAlbumOpen,
         isDev,
         isDevDebugOverlayVisible,
         devDebugSnapshot,
@@ -2555,8 +2765,6 @@ export default function App() {
         noTrackText: t('ui.noTrack'),
     }), [
         activePlaybackContext,
-        addNeteaseSongToQueue,
-        addNeteaseSongsToQueue,
         audioSrc,
         canToggleCurrentPlayback,
         closeSearchView,
@@ -2566,31 +2774,23 @@ export default function App() {
         devDebugSnapshot,
         duration,
         effectiveLoopMode,
-        handleUnifiedAlbumSelect,
-        handleUnifiedArtistSelect,
+        handleSearchResultAddToQueue,
+        handleSearchResultAlbumOpen,
+        handleSearchResultArtistOpen,
         handleSearchLoadMore,
         handleSearchOverlaySubmit,
-        handleSearchResultAlbumSelect,
-        handleSearchResultArtistSelect,
         handleSearchResultPlay,
         isDaylight,
         isDev,
         isDevDebugOverlayVisible,
         isNowPlayingControlDisabled,
         isSpotifyStageActive,
-        isOverlayVisible,
         isSearchOpen,
         isPlayerChromeHidden,
         lyrics,
         navigateToPlayer,
-        overlayStack,
         playerState,
-        playlists,
-        playOnlineQueueFromStart,
-        playSong,
-        popOverlay,
         publishStagePlayerPlaybackUpdate,
-        refreshUserData,
         seekMainAudio,
         seekSpotify,
         setPlayerState,
@@ -2601,8 +2801,6 @@ export default function App() {
         theme,
         toggleLoop,
         togglePlay,
-        topOverlay,
-        user?.userId,
     ]);
     const settingsDialog = useMemo(() => buildSettingsDialogModel({
         state: settingsModalState,
@@ -2622,6 +2820,8 @@ export default function App() {
         clearPersistedStagePlaybackCache,
         loadStageSessionIntoPlayback,
         nowPlayingConnectionStatus,
+        playerCapConnectionStatus,
+        playerCapPlayers,
         obsBrowserSourceStatus,
         refreshObsBrowserSourceStatus,
         onAudioOutputDeviceChange: handleAudioOutputDeviceChange,
@@ -2639,6 +2839,8 @@ export default function App() {
         loadCurrentSongLyricPreview,
         loadStageSessionIntoPlayback,
         nowPlayingConnectionStatus,
+        playerCapConnectionStatus,
+        playerCapPlayers,
         obsBrowserSourceStatus,
         refreshObsBrowserSourceStatus,
         settingsModalState,
@@ -2655,6 +2857,7 @@ export default function App() {
         showNaviLyricMatchModal,
         showOnlineLyricMatchModal,
         currentSong,
+        localSongs,
         setShowLyricMatchModal,
         setShowNaviLyricMatchModal,
         setShowOnlineLyricMatchModal,
@@ -2665,6 +2868,7 @@ export default function App() {
         setPendingUnavailableReplacement,
         handleUnavailableReplacementConfirm,
         settingsDialog,
+        providerSwitchConfirmDialog,
     }), [
         currentSong,
         handleLyricMatchComplete,
@@ -2672,7 +2876,9 @@ export default function App() {
         handleOnlineLyricMatchComplete,
         handleUnavailableReplacementConfirm,
         isDaylight,
+        localSongs,
         pendingUnavailableReplacement,
+        providerSwitchConfirmDialog,
         setPendingUnavailableReplacement,
         setShowLyricMatchModal,
         setShowNaviLyricMatchModal,
@@ -2721,6 +2927,7 @@ export default function App() {
             showTransparentWindowBorder={showTransparentWindowBorder}
             isPlayerView={isPlayerView}
             isTitlebarRevealed={isTitlebarRevealed}
+            alwaysShowMainWindowTitlebar={alwaysShowMainWindowTitlebar}
             isMainWindowClickThroughEnabled={isMainWindowClickThroughEnabled}
             showMainWindowClickThroughToggle={isMainWindowClickThroughEnabled ? isClickThroughToggleHotspotActive : isTitlebarRevealed}
             isDaylight={isDaylight}
@@ -2936,32 +3143,44 @@ export default function App() {
                         songAlbum={currentSongAlbum}
                         coverUrl={getCoverUrl()}
                         showText={currentView === 'player' && !isSettingsModalOpen}
-                        useCoverColorBg={useCoverColorBg}
                         seed={visualizerGeometrySeed}
                         staticMode={staticMode}
-                        paused={shouldPauseVisualizerBackground}
-                        backgroundOpacity={backgroundOpacity}
+                        backgroundStaticMode={
+                            shouldPauseVisualizerBackground
+                            || (
+                                visualizerBackgroundConfig.mode === 'latent'
+                                && latentBackgroundTuning.dynamicOnlyInPlayer
+                                && currentView !== 'player'
+                            )
+                        }
+                        paused={playerState !== PlayerState.PLAYING}
                         visualizerOpacity={visualizerOpacity}
-                        transparentBackground={currentView === 'player' && isPlayerPageTransparent && !isSettingsModalOpen}
-                        disableGeometricBackground={disableVisualizerGeometricBackground || isSettingsSubviewOpen}
-                        disableVignette={disableVisualizerVignette}
-                        visualizerBackgroundMode={visualizerBackgroundMode}
+                        background={{
+                            ...visualizerBackgroundConfig,
+                            transparent: currentView === 'player' && isPlayerPageTransparent && !isSettingsModalOpen,
+                            common: {
+                                ...visualizerBackgroundConfig.common,
+                                disableGeometricBackground: disableVisualizerGeometricBackground || isSettingsSubviewOpen,
+                            },
+                        }}
                         lyricsFontScale={lyricsFontScale}
+                        subtitleFontScale={subtitleFontScale}
                         subtitleOverlayOpacity={subtitleOverlayOpacity}
+                        subtitleOverlayBackground={subtitleOverlayBackground}
+                        showHarmonySubtitle={showHarmonySubtitle}
+                        harmonySubtitleBackground={harmonySubtitleBackground}
                         isPlayerChromeHidden={isPlayerChromeHidden}
                         hideTranslationSubtitle={shouldHidePlayerTranslationSubtitle}
                         showSubtitleTranslation={showSubtitleTranslation}
+                        subtitleContentMode={subtitleContentMode}
                         visualizerTunings={visualizerTunings}
-                        monetBackgroundTuning={monetBackgroundTuning}
                         onMonetTuningChange={handleSetMonetTuning}
                         cappellaCustomEmojiImages={cappellaCustomEmojiImages}
                         cappellaCustomAvatarImages={cappellaCustomAvatarImages}
-                        monetBackgroundImage={monetBackgroundImage}
                         monetPortraitImage={monetPortraitImage}
-                        urlBackgroundList={urlBackgroundList}
-                        urlBackgroundSelectedId={urlBackgroundSelectedId}
-                        onLyricLineSeek={visualizerMode === 'monet' ? handleMonetLyricLineSeek : undefined}
-                        onBack={navigateToHome}
+                        onLyricLineSeek={['monet', 'pendolo'].includes(visualizerMode) ? handleMonetLyricLineSeek : undefined}
+                        onBack={navigateBackFromPlayer}
+                        alwaysShowBackButton={alwaysShowPlayerBackButton}
                     />
                 )}
             </div>
@@ -2971,10 +3190,12 @@ export default function App() {
                     lyrics={lyrics}
                     currentLineIndex={currentLineIndex}
                     visualizerTheme={visualizerTheme}
+                    subtitleTheme={visualizerSubtitleTheme}
                     lyricsFontScale={lyricsFontScale}
+                    subtitleFontScale={subtitleFontScale}
                     shouldHidePlayerTranslationSubtitle={shouldHidePlayerTranslationSubtitle}
                     isDaylight={isDaylight}
-                    navigateToHome={navigateToHome}
+                    navigateToHome={navigateBackFromPlayer}
                 />
             )}
 
@@ -2982,7 +3203,13 @@ export default function App() {
                 <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center px-6">
                     <div className={`max-w-lg rounded-3xl border px-6 py-5 text-center backdrop-blur-md ${isDaylight ? 'border-black/10 bg-white/50 text-zinc-800' : 'border-white/10 bg-black/30 text-white'}`}>
                         <div className="text-xs uppercase tracking-[0.22em] opacity-50">
-                            {stageSource === 'spotify' ? 'Stage · Spotify' : stageSource === 'now-playing' ? 'Stage · Now Playing' : 'Stage · Stage API'}
+                            {stageSource === 'spotify'
+                                ? 'Stage · Spotify'
+                                : stageSource === 'now-playing'
+                                    ? 'Stage · Now Playing'
+                                : stageSource === 'playercap'
+                                    ? 'Stage · Nexus PlayerCap'
+                                    : 'Stage · Stage API'}
                         </div>
                         <div className="mt-3 text-2xl font-semibold">
                             {stageSource === 'spotify'
@@ -2996,13 +3223,15 @@ export default function App() {
                                 ? (nowPlayingTrack
                                     ? t('options.spotifyNoSyncedLyricsDescription')
                                     : nowPlayingConnectionStatus === 'error'
-                                    ? t('options.spotifyConnectionError')
-                                    : t('options.spotifyNoPlayback'))
-                                : stageSource === 'now-playing'
-                                ? (nowPlayingConnectionStatus === 'error'
-                                    ? t('options.stageConnectionError')
-                                    : t('options.stageNotRunning'))
-                                : t('options.enableStageModeDesc')}
+                                        ? t('options.spotifyConnectionError')
+                                        : t('options.spotifyNoPlayback'))
+                                : stageSource === 'playercap'
+                                    ? (playerCapConnectionStatus === 'connected' ? t('options.playerCapWaitingLyrics') : t('options.playerCapConnecting'))
+                                    : stageSource === 'now-playing'
+                                    ? (nowPlayingConnectionStatus === 'error'
+                                        ? t('options.stageConnectionError')
+                                        : t('options.stageNotRunning'))
+                                    : t('options.enableStageModeDesc')}
                         </div>
                     </div>
                 </div>

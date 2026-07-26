@@ -1,74 +1,85 @@
 import type React from 'react';
-import { PlayerState, type HomeViewTab, type SongResult } from '../../../types';
-import type LegacyHome from '../../Home';
+import { PlayerState, type SongResult } from '../../../types';
+import type { GridViewCollectionDescriptor } from './gridViewCollectionAdapters';
+import type { HomeSurfaceProps } from './homeSurfaceTypes';
+import { resolveSearchSource, type SearchSource } from '../../../stores/useSearchNavigationStore';
+import type { OnlineProviderPlatformState } from '../../../hooks/useOnlineProviderPlatform';
 
 // src/components/app/home/buildHomeModel.ts
 
-type LegacyHomeProps = React.ComponentProps<typeof LegacyHome>;
-
 export type HomeViewModel = {
-    legacyProps: LegacyHomeProps;
+    surfaceProps: HomeSurfaceProps;
+    onlineProviderPlatform?: OnlineProviderPlatformState;
+    onOpenCollection: (collection: GridViewCollectionDescriptor) => void;
+    onPushCollection: (collection: GridViewCollectionDescriptor) => void;
+    onBackCollection: () => void;
 };
 
 type BuildHomeModelParams = {
-    playSong: LegacyHomeProps['onPlaySong'];
-    navigateToPlayer: LegacyHomeProps['onBackToPlayer'];
-    refreshUserData: () => Promise<unknown>;
-    user: LegacyHomeProps['user'];
-    playlists: LegacyHomeProps['playlists'];
-    cloudPlaylist?: LegacyHomeProps['cloudPlaylist'];
-    currentSong: LegacyHomeProps['currentTrack'];
+    onlineProviderPlatform?: OnlineProviderPlatformState;
+    playSong: HomeSurfaceProps['onPlaySong'];
+    navigateToPlayer: HomeSurfaceProps['onBackToPlayer'];
+    refreshOnlineProviderPlaylists: () => Promise<unknown>;
+    user: HomeSurfaceProps['user'];
+    playlists: HomeSurfaceProps['playlists'];
+    cloudPlaylist?: HomeSurfaceProps['cloudPlaylist'];
+    currentSong: HomeSurfaceProps['currentTrack'];
     playerState: PlayerState;
-    handlePlaylistSelect: LegacyHomeProps['onSelectPlaylist'];
-    handleAlbumSelect: LegacyHomeProps['onSelectAlbum'];
-    handleArtistSelect: LegacyHomeProps['onSelectArtist'];
-    focusedPlaylistIndex?: LegacyHomeProps['focusedPlaylistIndex'];
-    setFocusedPlaylistIndex?: LegacyHomeProps['setFocusedPlaylistIndex'];
-    focusedFavoriteAlbumIndex?: LegacyHomeProps['focusedFavoriteAlbumIndex'];
-    setFocusedFavoriteAlbumIndex?: LegacyHomeProps['setFocusedFavoriteAlbumIndex'];
-    focusedRadioIndex?: LegacyHomeProps['focusedRadioIndex'];
-    setFocusedRadioIndex?: LegacyHomeProps['setFocusedRadioIndex'];
-    openSettings: NonNullable<LegacyHomeProps['onOpenSettings']>;
-    navigateToSearch: (args: { query: string; sourceTab: HomeViewTab; replace?: boolean }) => void;
-    openLocalAlbumByName?: LegacyHomeProps['onSelectLocalAlbum'];
-    openLocalArtistByName?: LegacyHomeProps['onSelectLocalArtist'];
-    localSongs: LegacyHomeProps['localSongs'];
-    localPlaylists: LegacyHomeProps['localPlaylists'];
-    onRefreshLocalSongs: LegacyHomeProps['onRefreshLocalSongs'];
-    onPlayLocalSong: LegacyHomeProps['onPlayLocalSong'];
-    onAddLocalSongToQueue?: LegacyHomeProps['onAddLocalSongToQueue'];
-    localMusicState: LegacyHomeProps['localMusicState'];
-    setLocalMusicState: LegacyHomeProps['setLocalMusicState'];
-    onMatchSong?: LegacyHomeProps['onMatchSong'];
-    onPlayNavidromeSong?: LegacyHomeProps['onPlayNavidromeSong'];
-    onAddNavidromeSongsToQueue?: LegacyHomeProps['onAddNavidromeSongsToQueue'];
-    onMatchNavidromeSong?: LegacyHomeProps['onMatchNavidromeSong'];
-    navidromeFocusedAlbumIndex?: LegacyHomeProps['navidromeFocusedAlbumIndex'];
-    setNavidromeFocusedAlbumIndex?: LegacyHomeProps['setNavidromeFocusedAlbumIndex'];
-    pendingNavidromeSelection?: LegacyHomeProps['pendingNavidromeSelection'];
+    handlePlaylistSelect: HomeSurfaceProps['onSelectPlaylist'];
+    handleAlbumSelect: HomeSurfaceProps['onSelectAlbum'];
+    handleArtistSelect: HomeSurfaceProps['onSelectArtist'];
+    focusedPlaylistIndex?: HomeSurfaceProps['focusedPlaylistIndex'];
+    setFocusedPlaylistIndex?: HomeSurfaceProps['setFocusedPlaylistIndex'];
+    focusedFavoriteAlbumIndex?: HomeSurfaceProps['focusedFavoriteAlbumIndex'];
+    setFocusedFavoriteAlbumIndex?: HomeSurfaceProps['setFocusedFavoriteAlbumIndex'];
+    focusedRadioIndex?: HomeSurfaceProps['focusedRadioIndex'];
+    setFocusedRadioIndex?: HomeSurfaceProps['setFocusedRadioIndex'];
+    openSettings: NonNullable<HomeSurfaceProps['onOpenSettings']>;
+    navigateToSearch: (args: { query: string; sourceTab: SearchSource; replace?: boolean }) => void;
+    openLocalAlbumByName?: HomeSurfaceProps['onSelectLocalAlbum'];
+    openLocalArtistByName?: HomeSurfaceProps['onSelectLocalArtist'];
+    localSongs: HomeSurfaceProps['localSongs'];
+    localLibraryCatalog: HomeSurfaceProps['localLibraryCatalog'];
+    localPlaylists: HomeSurfaceProps['localPlaylists'];
+    onRefreshLocalSongs: HomeSurfaceProps['onRefreshLocalSongs'];
+    onPlayLocalSong: HomeSurfaceProps['onPlayLocalSong'];
+    onAddLocalSongToQueue?: HomeSurfaceProps['onAddLocalSongToQueue'];
+    localMusicState: HomeSurfaceProps['localMusicState'];
+    setLocalMusicState: HomeSurfaceProps['setLocalMusicState'];
+    onMatchSong?: HomeSurfaceProps['onMatchSong'];
+    onPlayNavidromeSong?: HomeSurfaceProps['onPlayNavidromeSong'];
+    onAddNavidromeSongsToQueue?: HomeSurfaceProps['onAddNavidromeSongsToQueue'];
+    onMatchNavidromeSong?: HomeSurfaceProps['onMatchNavidromeSong'];
+    navidromeFocusedAlbumIndex?: HomeSurfaceProps['navidromeFocusedAlbumIndex'];
+    setNavidromeFocusedAlbumIndex?: HomeSurfaceProps['setNavidromeFocusedAlbumIndex'];
+    pendingNavidromeSelection?: HomeSurfaceProps['pendingNavidromeSelection'];
     setPendingNavidromeSelection: React.Dispatch<React.SetStateAction<any>>;
-    stageSource?: LegacyHomeProps['stageSource'];
+    stageSource?: HomeSurfaceProps['stageSource'];
     activePlaybackContext: 'main' | 'stage';
     openStagePlayer: () => Promise<void>;
-    stageStatus?: LegacyHomeProps['stageStatus'];
+    stageStatus?: HomeSurfaceProps['stageStatus'];
     setStageStatus: React.Dispatch<React.SetStateAction<any>>;
     leaveStagePlayback: () => void;
     clearStagePlaybackSession: () => void;
     clearPersistedStagePlaybackCache: () => Promise<void>;
     loadStageSessionIntoPlayback: (session: any) => Promise<void>;
-    theme: LegacyHomeProps['theme'];
-    navidromeEnabled: LegacyHomeProps['navidromeEnabled'];
+    theme: HomeSurfaceProps['theme'];
+    navidromeEnabled: HomeSurfaceProps['navidromeEnabled'];
     playAll: (songs: SongResult[]) => void;
     addAllToQueue: (songs: SongResult[]) => void;
     addSongToQueue: (song: SongResult) => void;
-    onStatusMessage?: LegacyHomeProps['onStatusMessage'];
+    onStatusMessage?: HomeSurfaceProps['onStatusMessage'];
+    onOpenCollection: (collection: GridViewCollectionDescriptor) => void;
+    onPushCollection: (collection: GridViewCollectionDescriptor) => void;
+    onBackCollection: () => void;
 };
 
 // Builds the full Home model from raw app dependencies so App.tsx no longer assembles nested props inline.
 export const buildHomeModel = ({
+    onlineProviderPlatform,
     playSong,
     navigateToPlayer,
-    refreshUserData,
+    refreshOnlineProviderPlaylists,
     user,
     playlists,
     cloudPlaylist,
@@ -88,6 +99,7 @@ export const buildHomeModel = ({
     openLocalAlbumByName,
     openLocalArtistByName,
     localSongs,
+    localLibraryCatalog,
     localPlaylists,
     onRefreshLocalSongs,
     onPlayLocalSong,
@@ -117,15 +129,22 @@ export const buildHomeModel = ({
     addAllToQueue,
     addSongToQueue,
     onStatusMessage,
+    onOpenCollection,
+    onPushCollection,
+    onBackCollection,
 }: BuildHomeModelParams): HomeViewModel => {
     return {
-        legacyProps: {
+        onlineProviderPlatform,
+        onOpenCollection,
+        onPushCollection,
+        onBackCollection,
+        surfaceProps: {
             onPlaySong: playSong,
             onBackToPlayer: navigateToPlayer,
-            onRefreshUser: () => refreshUserData(),
-            user,
-            playlists,
-            cloudPlaylist,
+            onRefreshUser: () => refreshOnlineProviderPlaylists(),
+            user: onlineProviderPlatform?.activeProvider?.user ?? user,
+            playlists: onlineProviderPlatform?.activeProvider?.collections.filter(collection => collection.type !== 'cloud') ?? playlists,
+            cloudPlaylist: onlineProviderPlatform?.activeProvider?.collections.find(collection => collection.type === 'cloud') ?? cloudPlaylist,
             currentTrack: currentSong,
             isPlaying: playerState === PlayerState.PLAYING,
             onSelectPlaylist: handlePlaylistSelect,
@@ -143,11 +162,12 @@ export const buildHomeModel = ({
             setFocusedRadioIndex,
             onOpenSettings: openSettings,
             onSearchCommitted: (query, sourceTab, replace = false) => {
-                navigateToSearch({ query, sourceTab, replace });
+                navigateToSearch({ query, sourceTab: resolveSearchSource(sourceTab), replace });
             },
             onSelectLocalAlbum: openLocalAlbumByName,
             onSelectLocalArtist: openLocalArtistByName,
             localSongs,
+            localLibraryCatalog,
             localPlaylists,
             onRefreshLocalSongs,
             onPlayLocalSong,
