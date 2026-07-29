@@ -12,7 +12,12 @@ const SPOTIFY_CALLBACK_PATH = '/callback';
 const SPOTIFY_REDIRECT_URI = `http://127.0.0.1:${SPOTIFY_CALLBACK_PORT}${SPOTIFY_CALLBACK_PATH}`;
 const SPOTIFY_SCOPES = ['user-read-playback-state', 'user-modify-playback-state'];
 const SPOTIFY_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const SPOTIFY_REQUEST_TIMEOUT_MS = 15 * 1000;
 const TOKEN_REFRESH_SKEW_MS = 60 * 1000;
+const SPOTIFY_RATE_LIMIT_FALLBACK_MS = 30 * 1000;
+const SPOTIFY_RATE_LIMIT_BUFFER_MS = 1000;
+const SPOTIFY_RATE_LIMIT_ERROR_MESSAGE = 'Spotify rate limit reached.';
+const MAX_TIMEOUT_MS = 2_147_483_647;
 const CLIENT_ID_SETTING_KEY = 'SPOTIFY_CLIENT_ID';
 const TOKEN_RECORD_SETTING_KEY = 'SPOTIFY_TOKEN_RECORD';
 
@@ -29,6 +34,32 @@ const buildCodeChallenge = (codeVerifier) => (
 const normalizeClientId = (value) => (typeof value === 'string' ? value.trim() : '');
 
 const isValidSpotifyClientId = (value) => /^[a-zA-Z0-9]{16,64}$/.test(normalizeClientId(value));
+
+// Converts Spotify's Retry-After value into a buffered cooldown, including HTTP-date responses.
+const resolveSpotifyRetryAfterMs = (value, nowMs = Date.now()) => {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  let retryAfterMs = SPOTIFY_RATE_LIMIT_FALLBACK_MS;
+
+  if (normalized) {
+    const retryAfterSec = Number(normalized);
+    if (Number.isFinite(retryAfterSec) && retryAfterSec >= 0) {
+      retryAfterMs = retryAfterSec * 1000;
+    } else {
+      const retryAtMs = Date.parse(normalized);
+      if (Number.isFinite(retryAtMs)) {
+        retryAfterMs = Math.max(0, retryAtMs - nowMs);
+      }
+    }
+  }
+
+  return Math.max(1000, Math.ceil(retryAfterMs) + SPOTIFY_RATE_LIMIT_BUFFER_MS);
+};
+
+const createSpotifyRateLimitError = (retryAfterMs) => {
+  const error = new Error(SPOTIFY_RATE_LIMIT_ERROR_MESSAGE);
+  error.retryAfterMs = Math.max(1000, Math.ceil(retryAfterMs));
+  return error;
+};
 
 const readGrantedScopes = (tokenRecord) => (
   typeof tokenRecord?.scope === 'string'
@@ -135,6 +166,8 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
   let authTimeout = null;
   let pendingAuthorization = false;
   let lastError = null;
+  let rateLimitedUntil = 0;
+  let rateLimitTimeout = null;
 
   const getClientId = () => normalizeClientId(privateStore.get(CLIENT_ID_SETTING_KEY));
 
@@ -179,6 +212,7 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
     const authenticated = Boolean(tokenRecord?.refreshToken || (tokenRecord?.accessToken && tokenRecord?.expiresAt > Date.now()));
     const scopes = readGrantedScopes(tokenRecord);
     const controlsAuthorized = scopes.includes('user-modify-playback-state');
+    const activeRateLimitDeadline = rateLimitedUntil > Date.now() ? rateLimitedUntil : null;
     return {
       configured: isValidSpotifyClientId(clientId),
       authenticated,
@@ -188,8 +222,11 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
       clientId,
       redirectUri: SPOTIFY_REDIRECT_URI,
       expiresAt: Number.isFinite(Number(tokenRecord?.expiresAt)) ? Number(tokenRecord.expiresAt) : null,
+      rateLimitedUntil: activeRateLimitDeadline,
       scopes,
-      error: lastError,
+      error: lastError === SPOTIFY_RATE_LIMIT_ERROR_MESSAGE && activeRateLimitDeadline === null
+        ? null
+        : lastError,
     };
   };
 
@@ -198,6 +235,49 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('spotify-status-changed', buildStatus());
     }
+  };
+
+  const clearRateLimitTimeout = () => {
+    if (rateLimitTimeout) {
+      clearTimeout(rateLimitTimeout);
+      rateLimitTimeout = null;
+    }
+  };
+
+  const clearRateLimit = ({ broadcast = false } = {}) => {
+    const changed = rateLimitedUntil > 0 || lastError === SPOTIFY_RATE_LIMIT_ERROR_MESSAGE;
+    clearRateLimitTimeout();
+    rateLimitedUntil = 0;
+    if (lastError === SPOTIFY_RATE_LIMIT_ERROR_MESSAGE) {
+      lastError = null;
+    }
+    if (broadcast && changed) {
+      broadcastStatus();
+    }
+    return changed;
+  };
+
+  // Owns the expiry transition so Settings cannot retain a stale cooldown when polling is inactive.
+  const scheduleRateLimitExpiry = () => {
+    clearRateLimitTimeout();
+    const remainingMs = Math.ceil(rateLimitedUntil - Date.now());
+    if (remainingMs <= 0) {
+      clearRateLimit({ broadcast: true });
+      return;
+    }
+    rateLimitTimeout = setTimeout(() => {
+      rateLimitTimeout = null;
+      if (rateLimitedUntil > Date.now()) {
+        scheduleRateLimitExpiry();
+        return;
+      }
+      clearRateLimit({ broadcast: true });
+    }, Math.min(remainingMs, MAX_TIMEOUT_MS));
+  };
+
+  const applyRateLimit = (retryAfterMs) => {
+    rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + retryAfterMs);
+    scheduleRateLimitExpiry();
   };
 
   const stopAuthServer = () => {
@@ -217,8 +297,14 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(params),
+      signal: AbortSignal.timeout(SPOTIFY_REQUEST_TIMEOUT_MS),
     });
     const payload = await response.json().catch(() => ({}));
+    if (response.status === 429) {
+      const retryAfterMs = resolveSpotifyRetryAfterMs(response.headers.get('retry-after'));
+      applyRateLimit(retryAfterMs);
+      throw createSpotifyRateLimitError(retryAfterMs);
+    }
     if (!response.ok) {
       const message = payload?.error_description || payload?.error || `Spotify token request failed (${response.status}).`;
       throw new Error(message);
@@ -274,10 +360,19 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
   };
 
   const spotifyFetch = async (pathname, init = {}) => {
+    const remainingCooldownMs = Math.ceil(rateLimitedUntil - Date.now());
+    if (remainingCooldownMs > 0) {
+      throw createSpotifyRateLimitError(remainingCooldownMs);
+    }
+    if (rateLimitedUntil > 0) {
+      clearRateLimit({ broadcast: true });
+    }
+
     const execute = async (forceRefresh) => {
       const accessToken = await getAccessToken({ forceRefresh });
       return fetch(`${SPOTIFY_API_BASE_URL}${pathname}`, {
         ...init,
+        signal: init.signal || AbortSignal.timeout(SPOTIFY_REQUEST_TIMEOUT_MS),
         headers: {
           ...(init.headers || {}),
           Authorization: `Bearer ${accessToken}`,
@@ -290,10 +385,9 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
       response = await execute(true);
     }
     if (response.status === 429) {
-      const retryAfterSec = Number(response.headers.get('retry-after'));
-      const error = new Error('Spotify rate limit reached.');
-      error.retryAfterMs = Number.isFinite(retryAfterSec) ? Math.max(1000, retryAfterSec * 1000) : 5000;
-      throw error;
+      const retryAfterMs = resolveSpotifyRetryAfterMs(response.headers.get('retry-after'));
+      applyRateLimit(retryAfterMs);
+      throw createSpotifyRateLimitError(retryAfterMs);
     }
     return response;
   };
@@ -308,6 +402,7 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
     privateStore.set(CLIENT_ID_SETTING_KEY, clientId);
     if (previousClientId && previousClientId !== clientId) {
       clearTokenRecord();
+      clearRateLimit();
     }
 
     stopAuthServer();
@@ -417,24 +512,36 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
     try {
       const response = await spotifyFetch('/me/player?additional_types=track,episode');
       if (response.status === 204) {
+        const errorChanged = lastError !== null;
         lastError = null;
+        if (errorChanged) {
+          broadcastStatus();
+        }
         return { playback: null, retryAfterMs: null };
       }
-      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
         const message = payload?.error?.message || `Spotify playback request failed (${response.status}).`;
         throw new Error(message);
       }
+      const payload = await response.json();
+      const errorChanged = lastError !== null;
       lastError = null;
+      if (errorChanged) {
+        broadcastStatus();
+      }
       return { playback: normalizeSpotifyPlayback(payload), retryAfterMs: null };
     } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-      if (/authorization is required/i.test(lastError)) {
+      const nextError = error instanceof Error ? error.message : String(error);
+      const retryAfterMs = Number.isFinite(Number(error?.retryAfterMs)) ? Number(error.retryAfterMs) : null;
+      const errorChanged = lastError !== nextError;
+      lastError = nextError;
+      if (errorChanged || retryAfterMs !== null || /authorization is required/i.test(lastError)) {
         broadcastStatus();
       }
       return {
         playback: null,
-        retryAfterMs: Number.isFinite(Number(error?.retryAfterMs)) ? Number(error.retryAfterMs) : null,
+        retryAfterMs,
         error: lastError,
       };
     }
@@ -455,16 +562,25 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
         throw new Error(message);
       }
 
+      const errorChanged = lastError !== null;
       lastError = null;
+      if (errorChanged) {
+        broadcastStatus();
+      }
       return { ok: true, retryAfterMs: null };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (/authorization is required|reconnect spotify/i.test(message)) {
+      const retryAfterMs = Number.isFinite(Number(error?.retryAfterMs)) ? Number(error.retryAfterMs) : null;
+      const errorChanged = lastError !== message;
+      lastError = message;
+      if (retryAfterMs !== null) {
+        broadcastStatus();
+      } else if (errorChanged || /authorization is required|reconnect spotify/i.test(message)) {
         broadcastStatus();
       }
       return {
         ok: false,
-        retryAfterMs: Number.isFinite(Number(error?.retryAfterMs)) ? Number(error.retryAfterMs) : null,
+        retryAfterMs,
         error: message,
       };
     }
@@ -476,7 +592,10 @@ function createSpotifyController({ privateStore, shell, safeStorage, getMainWind
     controlPlayback,
     disconnect,
     getPlayback,
-    stop: stopAuthServer,
+    stop: () => {
+      stopAuthServer();
+      clearRateLimitTimeout();
+    },
   };
 }
 
@@ -487,4 +606,5 @@ module.exports = {
   createSpotifyController,
   isValidSpotifyClientId,
   normalizeSpotifyPlayback,
+  resolveSpotifyRetryAfterMs,
 };

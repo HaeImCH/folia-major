@@ -13,6 +13,7 @@ import { ObsCopyUrlButton } from '../../shared/ObsCopyUrlButton';
 import { hasCustomObsFont } from '../../../utils/visualSettingsConfig';
 import { useSettingsUiStore } from '../../../stores/useSettingsUiStore';
 import SpotifySettingsCard from './SpotifySettingsCard';
+import SpotifyLocalSettingsCard from './SpotifyLocalSettingsCard';
 
 // src/components/modal/settings/IntegrationSettingsSubview.tsx
 // Integration settings for Discord, Stage sources, OBS, and Navidrome.
@@ -33,6 +34,7 @@ export type IntegrationSettingsChrome = {
 };
 
 export type IntegrationStageModel = {
+    nowPlayingConnectionError: string | null;
     nowPlayingConnectionStatus: NowPlayingConnectionStatus;
     obsBrowserSourceStatus?: ObsBrowserSourceStatus | null;
     onCopyText: (text: string) => Promise<void>;
@@ -104,6 +106,7 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
         toggleOffBackgroundClass,
     } = chrome;
     const {
+        nowPlayingConnectionError,
         nowPlayingConnectionStatus,
         obsBrowserSourceStatus,
         onCopyText,
@@ -474,14 +477,15 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
                             <div className="space-y-3">
                                 <div className={`rounded-xl border p-3 space-y-2 ${settingsCardClass}`}>
                                     <div className="text-[10px] uppercase tracking-[0.16em] opacity-40" style={{ color: 'var(--text-secondary)' }}>
-                                        Source
+                                        {t('options.stageSourceLabel')}
                                     </div>
-                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                                         {([
                                             { value: 'stage-api', label: 'Stage API' },
                                             { value: 'now-playing', label: 'Now Playing' },
                                             { value: 'playercap', label: 'Nexus PlayerCap' },
-                                            { value: 'spotify', label: 'Spotify' },
+                                            { value: 'spotify', label: t('options.stageSourceSpotifyWebApi') },
+                                            { value: 'spotify-local', label: t('options.stageSourceSpotifyLocal') },
                                         ] as Array<{ value: StageSource; label: string }>).map((option) => {
                                             const selected = stageSource === option.value;
                                             return (
@@ -489,7 +493,7 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
                                                     key={option.value}
                                                     type="button"
                                                     onClick={() => void onStageSourceChange?.(option.value)}
-                                                    className="rounded-xl border px-3 py-3 text-sm transition-colors"
+                                                    className="min-h-14 whitespace-normal break-words rounded-xl border px-2 py-3 text-sm transition-colors"
                                                     style={{ ...getAccentOptionStyle(selected), color: 'var(--text-primary)' }}
                                                 >
                                                     {option.label}
@@ -503,6 +507,17 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
                                     <SpotifySettingsCard
                                         settingsCardClass={settingsCardClass}
                                         onCopyText={onCopyText}
+                                    />
+                                ) : stageSource === 'spotify-local' ? (
+                                    <SpotifyLocalSettingsCard
+                                        connectionError={nowPlayingConnectionError}
+                                        connectionStatus={nowPlayingConnectionStatus}
+                                        errorBgColor={errorBgColor}
+                                        errorTextColor={errorTextColor}
+                                        isDaylight={isDaylight}
+                                        settingsCardClass={settingsCardClass}
+                                        successBgColor={successBgColor}
+                                        successTextColor={successTextColor}
                                     />
                                 ) : stageSource === 'playercap' ? (
                                     renderPlayerCapPanel()
@@ -616,7 +631,7 @@ const IntegrationSettingsSubview: React.FC<IntegrationSettingsSubviewProps> = ({
                             <div className="space-y-3">
                                 <div className={`rounded-xl border p-3 space-y-2 ${settingsCardClass}`}>
                                     <div className="text-[10px] uppercase tracking-[0.16em] opacity-40" style={{ color: 'var(--text-secondary)' }}>
-                                        Source
+                                        {t('options.stageSourceLabel')}
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">
                                         {([

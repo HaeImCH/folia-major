@@ -263,8 +263,27 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
     createSettingsCommand('settings-general', 'General settings', 'Open general app preferences', ['general', 'language settings', 'locale', '通用', '语言', 'tongyong', 'yuyan', 'ty', 'yy'], 'options', 'general'),
     createSettingsCommand('settings-playback', 'Playback settings', 'Open playback behavior settings', ['playback settings', 'playback', '播放', '播放设置', 'bofang', 'bofangshezhi', 'bf', 'bfsz'], 'options', 'playback'),
     createSettingsCommand('settings-local-lyrics-priority', 'Local song lyrics priority', 'Choose whether local songs prefer local or online lyrics', ['local lyrics priority', 'online lyrics first', 'local song lyrics', '本地歌曲歌词优先级', '在线优先', '本地歌词', 'bendigeciyouxianji', 'zaixianyouxian', 'bdgcyxj', 'zxyx'], 'options', 'playback'),
-    createSettingsCommand('settings-integration', 'Integration settings', 'Open Stage, Spotify, Now Playing, and Navidrome settings', ['integration', 'stage', 'spotify', 'now playing', 'navidrome settings', '集成', '连接', 'spotify设置', 'jicheng', 'lianjie', 'jc', 'lj'], 'options', 'integration'),
-    createSettingsCommand('settings-spotify', 'Spotify integration', 'Configure and connect Spotify', ['spotify', 'spotify connect', 'spotify settings', 'Spotify', 'Spotify连接', 'Spotify设置', '连接Spotify', 'lianjie spotify', 'sz spotify'], 'options', 'integration'),
+    createSettingsCommand('settings-integration', 'Integration settings', 'Open Stage, Now Playing, and Navidrome settings', ['integration', 'stage', 'now playing', 'navidrome settings', '集成', '连接', 'jicheng', 'lianjie', 'jc', 'lj'], 'options', 'integration'),
+    createSettingsCommand('settings-spotify', 'Spotify Web API integration', 'Configure and connect Spotify Web API', ['spotify web api', 'spotify api', 'spotify connect', 'spotify settings', 'spotify', 'Spotify连接', 'Spotify设置', '连接Spotify', 'lianjie spotify', 'sz spotify'], 'options', 'integration'),
+    {
+        id: 'settings-spotify-local',
+        group: 'settings',
+        title: 'Spotify Local integration',
+        description: 'Read the local Spotify desktop app without Web API authorization',
+        keywords: ['spotify local', 'local spotify', 'spotify lokal', 'spotify desktop local', 'gsmtc', 'mpris', 'applescript', 'Spotify本地', '本地Spotify', '本机Spotify', 'spotify bendi', 'spotify benji', 'bendi spotify', 'benji spotify', 'bd spotify', 'bj spotify'],
+        execute: async (_input, context) => {
+            const didSelectSource = await context.setStageSource('spotify-local');
+            if (!didSelectSource) {
+                context.setStatusMsg({
+                    type: 'error',
+                    text: context.t('commandPalette.spotifyLocalSelectionFailed', 'Could not select Spotify Local. Open Integration settings and try again.'),
+                });
+                return true;
+            }
+            context.openSettings('options', 'integration');
+            return true;
+        },
+    },
     createSettingsCommand('settings-discord-presence', 'Discord playback status', 'Open Discord Rich Presence settings', ['discord', 'rich presence', 'discord presence', 'playing status', '播放状态', 'discord状态', 'discordzhuangtai', 'bofangzhuangtai', 'dc', 'zt'], 'options', 'integration'),
     createSettingsCommand('settings-obs-browser-source', 'OBS browser source', 'Open OBS browser source settings', ['obs', 'browser source', 'live source', '直播源', '浏览器源', 'zhiboyuan', 'liulanqiyuan', 'zby', 'llqy'], 'options', 'integration'),
     createSettingsCommand('settings-storage', 'Storage settings', 'Open cache and storage settings', ['storage', 'cache', '存储', '缓存', 'cunchu', 'huancun', 'cc', 'hc'], 'options', 'storage'),
@@ -794,7 +813,7 @@ export const COMMAND_PALETTE_COMMANDS: CommandPaletteCommand[] = [
 ];
 
 export const getAvailableCommandPaletteCommands = (context?: CommandPaletteContext) => COMMAND_PALETTE_COMMANDS.filter(command => {
-    if (command.id === 'settings-desktop' || command.id === 'settings-update-channel' || command.id.startsWith('desktop-')) {
+    if (command.id === 'settings-desktop' || command.id === 'settings-update-channel' || command.id.startsWith('desktop-') || command.id.startsWith('settings-spotify')) {
         const isWebBrowser = typeof window !== 'undefined';
         const isElectron = isWebBrowser && Boolean((window as any).electron);
         if (isWebBrowser && !isElectron) {

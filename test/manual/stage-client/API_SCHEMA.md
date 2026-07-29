@@ -12,7 +12,7 @@
 - HTTP 错误通常返回 `ErrorPayload`。少数基础拒绝路径只返回 `{ "error": string }`，例如未授权、Stage 未启用或路由不存在。
 
 ```ts
-type StageSource = 'stage-api' | 'now-playing';
+type StageSource = 'stage-api' | 'now-playing' | 'playercap' | 'spotify' | 'spotify-local';
 type StageActiveEntryKind = 'lyrics' | 'media';
 type PlayerState = 'IDLE' | 'PLAYING' | 'PAUSED';
 type StagePlayerPlaybackContext =

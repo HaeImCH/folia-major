@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // test/unit/spotify/spotifyMain.test.ts
 // Verifies the main-process Spotify PKCE and playback normalization boundaries.
@@ -14,13 +14,53 @@ const readRepoFile = (relativePath: string) => readFile(path.join(repoRoot, rela
 const {
     buildCodeChallenge,
     buildSpotifyPlaybackControlRequest,
+    createSpotifyController,
     isValidSpotifyClientId,
     normalizeSpotifyPlayback,
+    resolveSpotifyRetryAfterMs,
 } = require('../../../electron/spotify.cjs') as {
     buildCodeChallenge: (verifier: string) => string;
     buildSpotifyPlaybackControlRequest: (command: ElectronSpotifyPlaybackControlCommand) => { method: string; pathname: string };
+    createSpotifyController: (dependencies: Record<string, unknown>) => {
+        buildStatus: () => ElectronSpotifyStatus;
+        getPlayback: () => Promise<ElectronSpotifyPlaybackResponse>;
+        controlPlayback: (command: ElectronSpotifyPlaybackControlCommand) => Promise<ElectronSpotifyPlaybackControlResponse>;
+    };
     isValidSpotifyClientId: (clientId: string) => boolean;
     normalizeSpotifyPlayback: (payload: unknown) => ElectronSpotifyPlayback | null;
+    resolveSpotifyRetryAfterMs: (value: string | null, nowMs?: number) => number;
+};
+
+afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+});
+
+const createAuthenticatedSpotifyController = (
+    getMainWindow: () => unknown = () => null,
+) => {
+    const tokenRecord = Buffer.from(JSON.stringify({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        scope: 'user-read-playback-state user-modify-playback-state',
+    })).toString('base64');
+    const values = new Map<string, unknown>([
+        ['SPOTIFY_CLIENT_ID', '0123456789abcdef0123456789abcdef'],
+        ['SPOTIFY_TOKEN_RECORD', `plain:${tokenRecord}`],
+    ]);
+
+    return createSpotifyController({
+        privateStore: {
+            get: (key: string) => values.get(key),
+            set: (key: string, value: unknown) => values.set(key, value),
+            delete: (key: string) => values.delete(key),
+        },
+        shell: { openExternal: vi.fn() },
+        safeStorage: { isEncryptionAvailable: () => false },
+        getMainWindow,
+    });
 };
 
 describe('Spotify main-process helpers', () => {
@@ -32,18 +72,22 @@ describe('Spotify main-process helpers', () => {
         ]);
 
         expect(mainSource).toContain("const { createSpotifyController } = require('./spotify.cjs');");
+        expect(mainSource).toContain("const { createSpotifyLocalController } = require('./spotifyLocal.cjs');");
         expect(mainSource).toContain("name: 'spotify-auth'");
         expect(mainSource).toContain("ipcMain.handle('spotify-get-status'");
         expect(mainSource).toContain("ipcMain.handle('spotify-connect'");
         expect(mainSource).toContain("ipcMain.handle('spotify-control-playback'");
+        expect(mainSource).toContain("ipcMain.handle('spotify-local-get-playback'");
         expect(mainSource).toContain('isTrustedMainWindowContents(event.sender)');
         expect(mainSource).toContain('spotify.stop();');
 
         expect(preloadSource).toContain("getSpotifyStatus: () => ipcRenderer.invoke('spotify-get-status')");
+        expect(preloadSource).toContain("getSpotifyLocalPlayback: () => ipcRenderer.invoke('spotify-local-get-playback')");
         expect(preloadSource).toContain("controlSpotifyPlayback: (command) => ipcRenderer.invoke('spotify-control-playback', command)");
         expect(preloadSource).toContain("ipcRenderer.on('spotify-status-changed', listener)");
 
         expect(stageApiSource).toContain("configuredSource === 'spotify'");
+        expect(stageApiSource).toContain("configuredSource === 'spotify-local'");
         expect(stageApiSource).toContain("configuredSource === 'playercap'");
     });
 
@@ -105,5 +149,145 @@ describe('Spotify main-process helpers', () => {
     it('rejects malformed playback controls before they reach Spotify', () => {
         expect(() => buildSpotifyPlaybackControlRequest({ action: 'seek', positionMs: -1 })).toThrow(/non-negative/i);
         expect(() => buildSpotifyPlaybackControlRequest({ action: 'repeat', state: 'bad' } as any)).toThrow(/repeat state/i);
+    });
+
+    it('parses Retry-After without turning a missing header into a one-second retry', () => {
+        expect(resolveSpotifyRetryAfterMs('2')).toBe(3000);
+        expect(resolveSpotifyRetryAfterMs(null)).toBe(31_000);
+        expect(resolveSpotifyRetryAfterMs('not-a-delay')).toBe(31_000);
+    });
+
+    it('publishes the cooldown deadline and clears it when the cooldown expires', async () => {
+        vi.useFakeTimers();
+        const now = new Date('2026-07-27T00:00:00Z');
+        vi.setSystemTime(now);
+        const send = vi.fn();
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, {
+            status: 429,
+            headers: { 'Retry-After': '10' },
+        })));
+        const controller = createAuthenticatedSpotifyController(() => ({
+            isDestroyed: () => false,
+            webContents: { send },
+        }));
+
+        await expect(controller.getPlayback()).resolves.toMatchObject({
+            error: 'Spotify rate limit reached.',
+            retryAfterMs: 11_000,
+        });
+        expect(controller.buildStatus()).toMatchObject({
+            error: 'Spotify rate limit reached.',
+            rateLimitedUntil: now.getTime() + 11_000,
+        });
+        expect(send).toHaveBeenLastCalledWith('spotify-status-changed', expect.objectContaining({
+            error: 'Spotify rate limit reached.',
+            rateLimitedUntil: now.getTime() + 11_000,
+        }));
+
+        await vi.advanceTimersByTimeAsync(10_999);
+        expect(controller.buildStatus().rateLimitedUntil).toBe(now.getTime() + 11_000);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(controller.buildStatus()).toMatchObject({ error: null, rateLimitedUntil: null });
+        expect(send).toHaveBeenLastCalledWith('spotify-status-changed', expect.objectContaining({
+            error: null,
+            rateLimitedUntil: null,
+        }));
+    });
+
+    it('shares a Spotify rate-limit cooldown between playback reads and controls', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-07-27T00:00:00Z'));
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(null, {
+                status: 429,
+                headers: { 'Retry-After': '10' },
+            }))
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const controller = createAuthenticatedSpotifyController();
+
+        const playbackResponse = await controller.getPlayback();
+        const controlResponse = await controller.controlPlayback({ action: 'pause' });
+
+        expect(playbackResponse).toMatchObject({
+            error: 'Spotify rate limit reached.',
+            retryAfterMs: 11_000,
+        });
+        expect(controlResponse.ok).toBe(false);
+        expect(controlResponse.error).toBe('Spotify rate limit reached.');
+        expect(controlResponse.retryAfterMs).toBeGreaterThan(10_000);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(11_000);
+        await expect(controller.getPlayback()).resolves.toEqual({ playback: null, retryAfterMs: null });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('renews and rebroadcasts a repeated rate limit with the same error text', async () => {
+        vi.useFakeTimers();
+        const now = new Date('2026-07-27T00:00:00Z');
+        vi.setSystemTime(now);
+        const send = vi.fn();
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(null, {
+                status: 429,
+                headers: { 'Retry-After': '1' },
+            }))
+            .mockResolvedValueOnce(new Response(null, {
+                status: 429,
+                headers: { 'Retry-After': '5' },
+            }));
+        vi.stubGlobal('fetch', fetchMock);
+        const controller = createAuthenticatedSpotifyController(() => ({
+            isDestroyed: () => false,
+            webContents: { send },
+        }));
+
+        await controller.getPlayback();
+        expect(controller.buildStatus().rateLimitedUntil).toBe(now.getTime() + 2_000);
+
+        vi.setSystemTime(now.getTime() + 2_000);
+        await controller.getPlayback();
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(controller.buildStatus()).toMatchObject({
+            error: 'Spotify rate limit reached.',
+            rateLimitedUntil: now.getTime() + 8_000,
+        });
+        expect(send).toHaveBeenLastCalledWith('spotify-status-changed', expect.objectContaining({
+            error: 'Spotify rate limit reached.',
+            rateLimitedUntil: now.getTime() + 8_000,
+        }));
+    });
+
+    it('replaces a stale rate-limit error after a post-cooldown control failure', async () => {
+        vi.useFakeTimers();
+        const now = new Date('2026-07-27T00:00:00Z');
+        vi.setSystemTime(now);
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(null, {
+                status: 429,
+                headers: { 'Retry-After': '1' },
+            }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                error: { message: 'No active Spotify device.' },
+            }), {
+                status: 403,
+                headers: { 'Content-Type': 'application/json' },
+            }));
+        vi.stubGlobal('fetch', fetchMock);
+        const controller = createAuthenticatedSpotifyController();
+
+        await controller.getPlayback();
+        vi.setSystemTime(now.getTime() + 2_000);
+        await expect(controller.controlPlayback({ action: 'pause' })).resolves.toMatchObject({
+            ok: false,
+            error: 'No active Spotify device.',
+        });
+
+        expect(controller.buildStatus()).toMatchObject({
+            error: 'No active Spotify device.',
+            rateLimitedUntil: null,
+        });
     });
 });

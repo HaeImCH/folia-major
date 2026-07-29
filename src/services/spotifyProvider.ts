@@ -1,11 +1,16 @@
 import type { NowPlayingConnectionStatus, NowPlayingTrackSnapshot } from '../types';
 
 // src/services/spotifyProvider.ts
-// Adapts Electron's Spotify Web API bridge to the existing external-playback clock contract.
+// Adapts Electron's Web API or local Spotify bridge to the external-playback clock contract.
 
-const SPOTIFY_POLL_INTERVAL_MS = 1000;
+const SPOTIFY_ACTIVE_POLL_INTERVAL_MS = 5000;
+const SPOTIFY_INACTIVE_POLL_INTERVAL_MS = 30_000;
+const SPOTIFY_LOCAL_ACTIVE_POLL_INTERVAL_MS = 2000;
+const SPOTIFY_LOCAL_INACTIVE_POLL_INTERVAL_MS = 15_000;
 const SPOTIFY_ERROR_RETRY_MS = 5000;
 export const SPOTIFY_PLAYBACK_REFRESH_EVENT = 'folia:spotify-playback-refresh';
+
+export type SpotifyProviderMode = 'web-api' | 'local';
 
 export type SpotifyProgressUpdate = {
     progressMs: number;
@@ -16,6 +21,7 @@ export type SpotifyProgressUpdate = {
 
 type SpotifyProviderCallbacks = {
     onConnectionStatusChange?: (status: NowPlayingConnectionStatus) => void;
+    onErrorChange?: (error: string | null) => void;
     onTrack?: (track: NowPlayingTrackSnapshot | null) => void;
     onPauseState?: (isPaused: boolean) => void;
     onProgress?: (update: SpotifyProgressUpdate) => void;
@@ -66,17 +72,50 @@ export const createSpotifyProgressUpdate = (
     };
 };
 
+export const resolveSpotifyPollIntervalMs = (
+    active: boolean,
+    mode: SpotifyProviderMode = 'web-api',
+) => {
+    if (mode === 'local') {
+        return active ? SPOTIFY_LOCAL_ACTIVE_POLL_INTERVAL_MS : SPOTIFY_LOCAL_INACTIVE_POLL_INTERVAL_MS;
+    }
+    if (!active) {
+        return SPOTIFY_INACTIVE_POLL_INTERVAL_MS;
+    }
+    return SPOTIFY_ACTIVE_POLL_INTERVAL_MS;
+};
+
+export const resolveSpotifyRateLimitRemainingSeconds = (
+    rateLimitedUntil: number | null | undefined,
+    nowMs = Date.now(),
+) => {
+    if (!Number.isFinite(rateLimitedUntil) || !rateLimitedUntil || rateLimitedUntil <= 0) {
+        return null;
+    }
+    const remainingSeconds = Math.ceil((rateLimitedUntil - nowMs) / 1000);
+    return remainingSeconds > 0 ? remainingSeconds : null;
+};
+
 export class SpotifyProvider {
     private readonly callbacks: SpotifyProviderCallbacks;
+    private readonly mode: SpotifyProviderMode;
     private timer: number | null = null;
     private stopped = true;
     private track: NowPlayingTrackSnapshot | null = null;
     private lastProgressMs = 0;
     private lastPauseState: boolean | null = null;
     private connectionStatus: NowPlayingConnectionStatus | null = null;
+    private error: string | null = null;
+    private consecutiveErrors = 0;
+    private active = false;
+    private rateLimitedUntilMs = 0;
 
-    constructor(callbacks: SpotifyProviderCallbacks = {}) {
+    constructor(
+        callbacks: SpotifyProviderCallbacks = {},
+        options: { mode?: SpotifyProviderMode } = {},
+    ) {
         this.callbacks = callbacks;
+        this.mode = options.mode ?? 'web-api';
     }
 
     start() {
@@ -84,6 +123,24 @@ export class SpotifyProvider {
         window.addEventListener(SPOTIFY_PLAYBACK_REFRESH_EVENT, this.requestImmediatePoll);
         this.updateConnectionStatus('connecting');
         void this.poll();
+    }
+
+    setActive(active: boolean) {
+        if (this.active === active) {
+            return;
+        }
+        this.active = active;
+        if (this.stopped || this.timer === null) {
+            return;
+        }
+        const remainingCooldownMs = Math.ceil(this.rateLimitedUntilMs - Date.now());
+        window.clearTimeout(this.timer);
+        this.timer = null;
+        this.schedule(remainingCooldownMs > 0
+            ? remainingCooldownMs
+            : this.active
+                ? 250
+                : resolveSpotifyPollIntervalMs(false, this.mode));
     }
 
     stop({ reset = true }: { reset?: boolean } = {}) {
@@ -97,9 +154,12 @@ export class SpotifyProvider {
             this.track = null;
             this.lastProgressMs = 0;
             this.lastPauseState = null;
+            this.rateLimitedUntilMs = 0;
+            this.consecutiveErrors = 0;
             this.callbacks.onTrack?.(null);
             this.callbacks.onPauseState?.(true);
             this.callbacks.onProgress?.({ progressMs: 0, isReplay: true, quality: 'precise', rttMs: 0 });
+            this.updateError(null);
             this.updateConnectionStatus('disabled');
         }
     }
@@ -118,6 +178,9 @@ export class SpotifyProvider {
         if (this.stopped || this.timer === null) {
             return;
         }
+        if (this.rateLimitedUntilMs > Date.now()) {
+            return;
+        }
         window.clearTimeout(this.timer);
         this.timer = null;
         this.schedule(250);
@@ -129,25 +192,40 @@ export class SpotifyProvider {
             return;
         }
 
-        if (!window.electron?.getSpotifyPlayback) {
-            this.updateConnectionStatus('error');
+        const getPlayback = this.mode === 'local'
+            ? window.electron?.getSpotifyLocalPlayback
+            : window.electron?.getSpotifyPlayback;
+        if (!getPlayback) {
+            this.handlePollError(`Spotify ${this.mode} playback bridge is unavailable.`);
             this.schedule(SPOTIFY_ERROR_RETRY_MS);
             return;
         }
 
         try {
             const requestStartedAt = performance.now();
-            const response = await window.electron.getSpotifyPlayback();
-            const rttMs = Math.max(0, performance.now() - requestStartedAt);
+            const response = await getPlayback();
+            const measuredRttMs = Math.max(0, performance.now() - requestStartedAt);
+            const rttMs = this.mode === 'local' ? 0 : measuredRttMs;
             if (this.stopped) {
                 return;
             }
             if (response.error) {
-                this.updateConnectionStatus('error');
-                this.schedule(response.retryAfterMs || SPOTIFY_ERROR_RETRY_MS);
+                if (response.retryAfterMs !== null && response.retryAfterMs > 0) {
+                    const retryAfterMs = Math.max(1000, response.retryAfterMs);
+                    this.rateLimitedUntilMs = Date.now() + retryAfterMs;
+                    this.updateError(response.error);
+                    this.updateConnectionStatus('connected');
+                    this.schedule(retryAfterMs);
+                    return;
+                }
+                this.handlePollError(response.error);
+                this.schedule(SPOTIFY_ERROR_RETRY_MS);
                 return;
             }
 
+            this.rateLimitedUntilMs = 0;
+            this.consecutiveErrors = 0;
+            this.updateError(null);
             this.updateConnectionStatus('connected');
             const playback = response.playback;
             const nextTrack = spotifyPlaybackToTrackSnapshot(playback);
@@ -159,17 +237,54 @@ export class SpotifyProvider {
             const progressUpdate = createSpotifyProgressUpdate(playback, this.lastProgressMs, rttMs);
             this.lastProgressMs = progressUpdate.progressMs;
             const isPaused = !(playback?.isPlaying ?? false);
-            if (isPaused !== this.lastPauseState) {
-                this.lastPauseState = isPaused;
-                this.callbacks.onPauseState?.(isPaused);
-            }
+            this.updatePauseState(isPaused);
             this.callbacks.onProgress?.(progressUpdate);
-            this.schedule(SPOTIFY_POLL_INTERVAL_MS);
+            this.schedule(resolveSpotifyPollIntervalMs(this.active, this.mode));
         } catch (error) {
-            console.warn('[Spotify] Playback poll failed', error);
-            this.updateConnectionStatus('error');
+            console.warn(`[Spotify ${this.mode}] Playback poll failed`, error);
+            this.handlePollError(error instanceof Error ? error.message : String(error));
             this.schedule(SPOTIFY_ERROR_RETRY_MS);
         }
+    }
+
+    // Local probe failures pause immediately, then clear stale content after three failed reads.
+    private handlePollError(error: string) {
+        this.updateError(error);
+        this.updateConnectionStatus('error');
+        if (this.mode !== 'local') {
+            return;
+        }
+
+        this.consecutiveErrors += 1;
+        this.updatePauseState(true);
+        if (this.consecutiveErrors < 3) {
+            return;
+        }
+
+        if (this.track !== null) {
+            this.track = null;
+            this.callbacks.onTrack?.(null);
+        }
+        if (this.lastProgressMs !== 0) {
+            this.lastProgressMs = 0;
+            this.callbacks.onProgress?.({ progressMs: 0, isReplay: true, quality: 'precise', rttMs: 0 });
+        }
+    }
+
+    private updatePauseState(isPaused: boolean) {
+        if (isPaused === this.lastPauseState) {
+            return;
+        }
+        this.lastPauseState = isPaused;
+        this.callbacks.onPauseState?.(isPaused);
+    }
+
+    private updateError(error: string | null) {
+        if (error === this.error) {
+            return;
+        }
+        this.error = error;
+        this.callbacks.onErrorChange?.(error);
     }
 
     private updateConnectionStatus(status: NowPlayingConnectionStatus) {

@@ -88,6 +88,11 @@
       }
     ],
     "mac": {
+      "identity": "-",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Folia reads the current track and playback position from Spotify to synchronize lyrics."
+      },
+      "entitlements": "build/entitlements.mac.plist",
       "target": [
         {
           "target": "dmg",

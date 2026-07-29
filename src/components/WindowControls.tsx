@@ -1,28 +1,26 @@
-import React, { useState, useEffect } from 'react';
-import { Copy, Minus, Radio, Square, X } from 'lucide-react';
+import React from 'react';
+import { Copy, Maximize2, Minimize2, Minus, Radio, Square, X } from 'lucide-react';
 
 export default function WindowControls({
     revealed,
+    isExpanded,
+    expandMode,
     isDaylight = false,
     isMainWindowClickThroughEnabled = false,
 }: {
     revealed: boolean;
+    isExpanded: boolean;
+    expandMode: ElectronMainWindowState['expandMode'];
     isDaylight?: boolean;
     isMainWindowClickThroughEnabled?: boolean;
 }) {
-    const [isMaximized, setIsMaximized] = useState(false);
-    const electron = (window as any).electron;
-
-    useEffect(() => {
-        if (!electron) return;
-        const checkMaximize = async () => setIsMaximized(await electron.isWindowMaximized());
-        checkMaximize();
-        window.addEventListener('resize', checkMaximize);
-        return () => window.removeEventListener('resize', checkMaximize);
-    }, [electron]);
+    const electron = window.electron;
 
     if (!electron) return null;
 
+    const expandLabel = expandMode === 'fullscreen'
+        ? (isExpanded ? 'Exit fullscreen' : 'Enter fullscreen')
+        : (isExpanded ? 'Restore window' : 'Maximize window');
     const remoteControlVisible = revealed && !isMainWindowClickThroughEnabled;
     const standardControlsVisible = revealed && !isMainWindowClickThroughEnabled;
     const remoteBtnClass = `flex items-center justify-center w-11 h-full transition-all duration-200 ${
@@ -73,12 +71,13 @@ export default function WindowControls({
             <button
                 className={btnClass}
                 tabIndex={standardControlsVisible ? 0 : -1}
-                onClick={async () => {
-                    await electron.toggleMaximizeWindow();
-                    setIsMaximized(await electron.isWindowMaximized());
-                }}
+                aria-label={expandLabel}
+                title={expandLabel}
+                onClick={() => void electron.toggleMaximizeWindow()}
             >
-                {isMaximized ? <Copy size={13} /> : <Square size={13} />}
+                {expandMode === 'fullscreen'
+                    ? isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />
+                    : isExpanded ? <Copy size={13} /> : <Square size={13} />}
             </button>
             <button
                 className={closeBtnClass}

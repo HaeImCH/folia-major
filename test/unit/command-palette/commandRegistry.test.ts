@@ -17,6 +17,7 @@ const createContext = (overrides: Partial<CommandPaletteContext> = {}): CommandP
     toggleBrowserFullscreen: vi.fn(async () => true),
     toggleRemoteControlWindow: vi.fn(async () => true),
     toggleMainWindowAlwaysOnTop: vi.fn(async () => true),
+    setStageSource: vi.fn(async () => true),
     setHomeViewTab: vi.fn(),
     setPanelTab: vi.fn(),
     setIsPanelOpen: vi.fn(),
@@ -111,6 +112,62 @@ describe('command palette registry', () => {
         match.command.execute(match.input, context);
 
         expect(context.openSettings).toHaveBeenCalledWith('options', 'playback');
+    });
+
+    it('opens distinct Spotify Web API and Local integration commands on desktop', async () => {
+        vi.stubGlobal('window', { electron: {} });
+
+        try {
+            const context = createContext();
+            expect(getCommandPaletteMatches('spotify web api')[0].command.id).toBe('settings-spotify');
+
+            for (const query of ['spotify local', '本地Spotify', 'bendi spotify']) {
+                expect(getCommandPaletteMatches(query)[0].command.id).toBe('settings-spotify-local');
+            }
+
+            const [localMatch] = getCommandPaletteMatches('spotify local');
+            const didExecute = await localMatch.command.execute(localMatch.input, context);
+            expect(context.setStageSource).toHaveBeenCalledWith('spotify-local');
+            expect(context.openSettings).toHaveBeenCalledWith('options', 'integration');
+            expect(didExecute).toBe(true);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('closes with an error instead of opening settings when Spotify Local selection fails', async () => {
+        vi.stubGlobal('window', { electron: {} });
+
+        try {
+            const context = createContext({
+                setStageSource: vi.fn(async () => false),
+            });
+            const [localMatch] = getCommandPaletteMatches('spotify local');
+
+            const didExecute = await localMatch.command.execute(localMatch.input, context);
+
+            expect(didExecute).toBe(true);
+            expect(context.openSettings).not.toHaveBeenCalled();
+            expect(context.setStatusMsg).toHaveBeenCalledWith({
+                type: 'error',
+                text: 'Could not select Spotify Local. Open Integration settings and try again.',
+            });
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('hides Spotify integration commands outside Electron', () => {
+        vi.stubGlobal('window', {});
+
+        try {
+            expect(getCommandPaletteMatches('spotify web api').some(match => match.command.id === 'settings-spotify')).toBe(false);
+            expect(getCommandPaletteMatches('spotify local').some(match => match.command.id === 'settings-spotify-local')).toBe(false);
+            expect(getCommandPaletteMatches('spotify web api')).toEqual([]);
+            expect(getCommandPaletteMatches('spotify local')).toEqual([]);
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 
     it('matches sync server settings and manual sync commands', () => {

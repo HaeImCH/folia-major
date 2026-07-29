@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, Loader2, LogOut, Music2 } from 'lucide-react';
+import { Check, Clock3, Copy, ExternalLink, Loader2, LogOut, Music2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { resolveSpotifyRateLimitRemainingSeconds } from '../../../services/spotifyProvider';
+import { formatTime } from '../../../utils/appPlaybackHelpers';
 
 // src/components/modal/settings/SpotifySettingsCard.tsx
 // Manages the desktop-only Spotify Client ID and PKCE authorization flow.
@@ -22,13 +24,24 @@ const SpotifySettingsCard: React.FC<SpotifySettingsCardProps> = ({
     const [busy, setBusy] = useState(false);
     const [copied, setCopied] = useState(false);
     const [localError, setLocalError] = useState<string | null>(null);
+    const [rateLimitRemainingSeconds, setRateLimitRemainingSeconds] = useState<number | null>(null);
 
     useEffect(() => {
         let disposed = false;
+        let receivedStatusUpdate = false;
+        const unsubscribe = window.electron?.onSpotifyStatusChanged?.((nextStatus) => {
+            receivedStatusUpdate = true;
+            setStatus(nextStatus);
+            setClientId(nextStatus.clientId);
+            setLocalError(null);
+            setBusy(false);
+        });
+
         void window.electron?.getSpotifyStatus?.().then((nextStatus) => {
-            if (!disposed) {
+            if (!disposed && !receivedStatusUpdate) {
                 setStatus(nextStatus);
                 setClientId(nextStatus.clientId);
+                setLocalError(null);
             }
         }).catch((error) => {
             if (!disposed) {
@@ -36,17 +49,31 @@ const SpotifySettingsCard: React.FC<SpotifySettingsCardProps> = ({
             }
         });
 
-        const unsubscribe = window.electron?.onSpotifyStatusChanged?.((nextStatus) => {
-            setStatus(nextStatus);
-            setClientId(nextStatus.clientId);
-            setBusy(false);
-        });
-
         return () => {
             disposed = true;
             unsubscribe?.();
         };
     }, []);
+
+    useEffect(() => {
+        const rateLimitedUntil = status?.rateLimitedUntil ?? null;
+        const updateRemainingTime = () => {
+            const nextRemaining = resolveSpotifyRateLimitRemainingSeconds(rateLimitedUntil);
+            setRateLimitRemainingSeconds(current => current === nextRemaining ? current : nextRemaining);
+            return nextRemaining;
+        };
+        const initialRemaining = updateRemainingTime();
+        if (initialRemaining === null) {
+            return;
+        }
+
+        const timer = window.setInterval(() => {
+            if (updateRemainingTime() === null) {
+                window.clearInterval(timer);
+            }
+        }, 1000);
+        return () => window.clearInterval(timer);
+    }, [status?.rateLimitedUntil]);
 
     const handleConnect = async () => {
         setBusy(true);
@@ -92,14 +119,16 @@ const SpotifySettingsCard: React.FC<SpotifySettingsCardProps> = ({
             : status?.authenticated
             ? t('options.spotifyConnected')
             : t('options.spotifyDisconnected');
-    const error = localError || status?.error;
+    const rateLimitActive = rateLimitRemainingSeconds !== null;
+    const statusError = status?.error;
+    const error = localError || (/^Spotify rate limit reached\.?$/i.test(statusError || '') ? null : statusError);
 
     return (
         <div className={`rounded-xl border p-3 space-y-4 ${settingsCardClass}`}>
             <div className="flex items-start justify-between gap-3">
                 <div>
                     <div className="flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                        <Music2 size={15} /> Spotify
+                        <Music2 size={15} /> {t('options.spotifyWebApiTitle')}
                     </div>
                     <div className="mt-1 text-[11px] opacity-55" style={{ color: 'var(--text-secondary)' }}>
                         {t('options.spotifyMirrorDescription')}
@@ -151,6 +180,15 @@ const SpotifySettingsCard: React.FC<SpotifySettingsCardProps> = ({
             {error && (
                 <div className="rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
                     {error}
+                </div>
+            )}
+
+            {rateLimitActive && (
+                <div className="flex items-center gap-2 rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                    <Clock3 size={14} className="shrink-0" />
+                    <span>
+                        {t('options.spotifyRateLimitCountdown', { time: formatTime(rateLimitRemainingSeconds) })}
+                    </span>
                 </div>
             )}
 

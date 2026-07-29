@@ -115,6 +115,51 @@ describe('home stage entry wiring', () => {
         expect(model.surfaceProps.stageSource).toBeUndefined();
         expect(model.surfaceProps.stageIsActive).toBe(false);
     });
+
+    it('applies the authoritative status returned by a Stage source switch', async () => {
+        const nextStatus = {
+            enabled: false,
+            modeEnabled: true,
+            source: 'spotify-local' as const,
+        };
+        const setStageSource = vi.fn().mockResolvedValue(nextStatus);
+        vi.stubGlobal('window', { electron: { setStageSource } });
+
+        try {
+            const params = createBaseParams();
+            const model = buildHomeModel(params);
+
+            await model.surfaceProps.onStageSourceChange?.('spotify-local');
+
+            expect(setStageSource).toHaveBeenCalledWith('spotify-local');
+            expect(params.setStageStatus).toHaveBeenCalledWith(nextStatus);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('handles a rejected Stage source switch without updating stale status', async () => {
+        const transitionError = new Error('Stage port is already in use');
+        const setStageSource = vi.fn().mockRejectedValue(transitionError);
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        vi.stubGlobal('window', { electron: { setStageSource } });
+
+        try {
+            const params = createBaseParams();
+            const model = buildHomeModel(params);
+
+            await expect(model.surfaceProps.onStageSourceChange?.('stage-api')).resolves.toBeUndefined();
+
+            expect(params.setStageStatus).not.toHaveBeenCalled();
+            expect(consoleError).toHaveBeenCalledWith(
+                '[buildHomeModel] Failed to change stage source:',
+                transitionError,
+            );
+        } finally {
+            consoleError.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
 });
 
 describe('home stage entry source contracts', () => {

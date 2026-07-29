@@ -21,18 +21,27 @@ Realeco 发布仅在 `main` 修改根目录 `realeco-release` 时触发。自动
 
 Cielo 的 `[canary]` 推送会更新滚动的 `cielo` prerelease，供 Cielo 通道客户端获取更新。手动运行 Cielo 工作流时可选择 `branch-release`，为当前分支和提交创建独立的 `cielo-<branch>-<sha>` prerelease，供人工下载和回归；该 Release 不参与客户端自动更新。选择 `artifacts` 则不创建 Release，只将各平台构建产物保留 14 天。
 
-### Windows Spotify 接入
+### 桌面端 Spotify 接入
 
-Spotify 作为桌面端 Stage 来源运行：Spotify 官方客户端负责音频，Folia 通过 Spotify Web API 读取当前歌曲和播放时间、控制播放/暂停/进度/切歌/循环，并复用项目现有的多来源歌词自动匹配。控制功能需要 Spotify Premium 和一个可用的 Spotify Connect 播放设备。
+Spotify 官方客户端始终负责音频，Folia 提供两个相互独立的桌面端 Stage 来源：
+
+- `Spotify（本地）`直接从操作系统读取当前歌曲与时间轴。macOS 使用 Apple Events，Windows 使用 GSMTC，Linux 优先使用 `playerctl` 并以 `gdbus` 作为降级方案。此模式不需要 Spotify Client ID、OAuth、Premium 或 Web API 配额，只读且不提供播放控制。
+- `Spotify（Web API）`通过 Spotify Web API 读取当前歌曲和播放时间，并控制播放/暂停/进度/切歌/循环。控制功能需要 Spotify Premium 和一个可用的 Spotify Connect 播放设备。
 
 1. 在 [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) 创建应用并取得 Client ID；不需要 Client Secret。
 2. 在应用的 Redirect URIs 中加入 `http://127.0.0.1:43827/callback`。
-3. 在 Folia 的“设置 → 集成 → Stage Mode”中选择 Spotify，粘贴 Client ID 并完成浏览器授权。如果是从只读版本升级，需要点击“重新连接”并批准新的播放控制权限。
+3. 在 Folia 的“设置 → 集成 → Stage Mode”中选择 `Spotify (Web API)`，粘贴 Client ID 并完成浏览器授权。如果是从只读版本升级，需要点击“重新连接”并批准新的播放控制权限。
 4. 在 Spotify 官方客户端开始播放，然后从 Folia 首页进入 Stage。
 
-Folia 会优先匹配逐字歌词，并允许带真实时间轴的逐行歌词作为降级方案。静态文本、无时间戳歌词或完全没有歌词的曲目不会被加载为当前歌曲；Stage 会保持未激活并明确提示“未找到同步歌词”，避免出现空白歌词动画或错误高亮。播放中的歌词时钟会把实测 Spotify 请求往返时间的一半计入锚点，减少 API 返回造成的轻微落后。
+本地模式无需上述授权：启用 Stage Mode 后选择 `Spotify (Local)`，在 Spotify 桌面客户端开始播放，再从首页进入 Stage。macOS 首次读取时需要在系统提示中允许 Folia 控制 Spotify；如果曾拒绝，可在“系统设置 → 隐私与安全性 → 自动化”中重新开启。
 
-授权使用 Authorization Code with PKCE，刷新令牌由 Electron 主进程单独保存，并在 Windows 可用时通过系统安全存储加密。此功能请求 `user-read-playback-state` 与 `user-modify-playback-state`，不会接收或重新分发 Spotify 音频。
+Linux 需要系统提供 `playerctl` 或 `gdbus`；精简发行版应至少安装其中一个。沙盒化安装还需要访问会话 D-Bus，第三方 Flatpak 包必须单独开放该权限。
+
+两种 Spotify 来源都会复用项目现有的多来源歌词自动匹配。Folia 会优先匹配逐字歌词，并允许带真实时间轴的逐行歌词作为降级方案。静态文本、无时间戳歌词或完全没有歌词的曲目不会被加载为当前歌曲；Stage 会保持未激活并明确提示“未找到同步歌词”，避免出现空白歌词动画或错误高亮。Web API 模式会把实测请求往返时间的一半计入歌词时钟锚点；本地模式直接使用操作系统采样的播放位置。
+
+如果 Web API 返回 `429`，Folia 会自动遵守服务端的 `Retry-After` 冷却时间。等待后会自动恢复；重复点击控制按钮或重新授权不会重置应用级限流。此冷却不影响本地模式。
+
+授权使用 Authorization Code with PKCE，刷新令牌由 Electron 主进程单独保存，并在系统安全存储可用时加密。此功能请求 `user-read-playback-state` 与 `user-modify-playback-state`，不会接收或重新分发 Spotify 音频。
 
 ### Linux 获取方式
 

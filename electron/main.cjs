@@ -5,10 +5,12 @@ const path = require('path');
 const Store = require('electron-store').default || require('electron-store');
 const crypto = require('crypto');
 const { createStageApi } = require('./stageApi.cjs');
+const { getWindowState, toggleWindowExpandControl } = require('./windowState.cjs');
 const { createWindowPlaybackHandoffStore } = require('./windowPlaybackHandoff.cjs');
 const { createKugouApiBridge } = require('./kugouApiBridge.cjs');
 const { DEFAULT_DISCORD_APPLICATION_ID, createDiscordPresenceController } = require('./discordPresence.cjs');
 const { createSpotifyController } = require('./spotify.cjs');
+const { createSpotifyLocalController } = require('./spotifyLocal.cjs');
 const { createVoiceInputPauseMonitor } = require('./voiceInputPause.cjs');
 const { getReleaseUrl, getUpdateProviderConfig, resolveReleaseChannel } = require('./updateChannels.cjs');
 const { sanitizeDualTheme: sanitizeGeneratedDualTheme } = require('../shared/themeSanitizer.cjs');
@@ -373,6 +375,7 @@ const spotify = createSpotifyController({
   safeStorage,
   getMainWindow: () => mainWindow,
 });
+const spotifyLocal = createSpotifyLocalController();
 
 const discordPresence = createDiscordPresenceController({
   getApplicationId: () => DEFAULT_DISCORD_APPLICATION_ID,
@@ -401,6 +404,14 @@ function broadcastPlaybackSyncBridgeStatus() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('playback-sync-bridge-status-changed', buildPlaybackSyncBridgeStatus());
   }
+}
+
+function broadcastMainWindowState(targetWindow = mainWindow) {
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  targetWindow.webContents.send('main-window-state-changed', getWindowState(targetWindow));
 }
 
 function getStoredWindowState() {
@@ -476,14 +487,14 @@ function clearWindowStateSaveTimer() {
 }
 
 function saveWindowState(win, options = {}) {
-  if (!win || win.isDestroyed()) {
+  if (!win || win.isDestroyed() || win.isFullScreen()) {
     return;
   }
 
   const isMaximized = win.isMaximized();
   const snapshot = {
     isMaximized,
-    bounds: isMaximized ? null : win.getBounds(),
+    bounds: isMaximized ? null : win.getNormalBounds(),
   };
 
   if (options.deferred) {
@@ -2815,10 +2826,14 @@ function createWindow(options = {}) {
   });
   win.on('maximize', () => {
     saveWindowState(win);
+    broadcastMainWindowState(win);
   });
   win.on('unmaximize', () => {
     saveWindowState(win);
+    broadcastMainWindowState(win);
   });
+  win.on('enter-full-screen', () => broadcastMainWindowState(win));
+  win.on('leave-full-screen', () => broadcastMainWindowState(win));
   win.on('close', () => {
     saveWindowState(win);
   });
@@ -2973,8 +2988,16 @@ ipcMain.handle('set-app-locale', (event, localeKey) => {
   return localeKey;
 });
 
-ipcMain.handle('save-settings', (event, key, value) => {
+ipcMain.handle('save-settings', async (event, key, value) => {
   if (key === 'DISCORD_RICH_PRESENCE_APPLICATION_ID') {
+    return getPublicSettings();
+  }
+
+  if (key === STAGE_MODE_SOURCE_SETTING_KEY) {
+    if (!isTrustedMainWindowContents(event.sender)) {
+      throw new Error('Untrusted renderer attempted to change the Stage source.');
+    }
+    await stageApi.setStageSource(value);
     return getPublicSettings();
   }
 
@@ -3075,12 +3098,6 @@ ipcMain.handle('save-settings', (event, key, value) => {
   if (key === REMOTE_CONTROL_SKIP_TASKBAR_SETTING_KEY) {
     remoteControlSkipTaskbarEnabled = Boolean(nextValue);
     applyRemoteControlSkipTaskbar(remoteControlWindow);
-  }
-
-  if (key === STAGE_MODE_SOURCE_SETTING_KEY) {
-    void stageApi.syncStageModeState?.().catch((error) => {
-      console.error('[Stage] Failed to sync Stage mode source setting', error);
-    });
   }
 
   if (key === DISCORD_RICH_PRESENCE_ENABLED_SETTING_KEY) {
@@ -3252,18 +3269,12 @@ ipcMain.handle('window-minimize', () => {
   return true;
 });
 
-ipcMain.handle('window-toggle-maximize', () => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
+ipcMain.handle('window-toggle-maximize', (event) => {
+  if (!isTrustedMainWindowContents(event.sender)) {
     return false;
   }
 
-  if (mainWindow.isMaximized()) {
-    mainWindow.unmaximize();
-    return false;
-  }
-
-  mainWindow.maximize();
-  return true;
+  return toggleWindowExpandControl(mainWindow);
 });
 
 ipcMain.handle('window-toggle-fullscreen', (event) => {
@@ -3291,6 +3302,14 @@ ipcMain.handle('window-is-maximized', () => {
   }
 
   return mainWindow.isMaximized();
+});
+
+ipcMain.handle('window-get-state', (event) => {
+  if (!isTrustedMainWindowContents(event.sender)) {
+    return getWindowState(null);
+  }
+
+  return getWindowState(mainWindow);
 });
 
 ipcMain.handle('window-get-transparent-mode', (event) => {
@@ -3485,6 +3504,13 @@ ipcMain.handle('spotify-get-playback', (event) => {
   return spotify.getPlayback();
 });
 
+ipcMain.handle('spotify-local-get-playback', (event) => {
+  if (!isTrustedMainWindowContents(event.sender)) {
+    throw new Error('Untrusted renderer attempted to read local Spotify playback.');
+  }
+  return spotifyLocal.getPlayback();
+});
+
 ipcMain.handle('spotify-control-playback', (event, command) => {
   if (!isTrustedMainWindowContents(event.sender)) {
     throw new Error('Untrusted renderer attempted to control Spotify playback.');
@@ -3506,6 +3532,14 @@ ipcMain.handle('stage-get-status', () => {
 
 ipcMain.handle('stage-set-enabled', async (_event, enabled) => {
   return stageApi.setStageEnabled(enabled);
+});
+
+ipcMain.handle('stage-set-source', async (event, source) => {
+  if (!isTrustedMainWindowContents(event.sender)) {
+    throw new Error('Untrusted renderer attempted to change the Stage source.');
+  }
+
+  return stageApi.setStageSource(source);
 });
 
 ipcMain.handle('stage-regenerate-token', async () => {

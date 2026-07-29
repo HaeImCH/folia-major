@@ -176,6 +176,12 @@ declare global {
     unlockHoverActive?: boolean;
   }
 
+  interface ElectronMainWindowState {
+    expandMode: 'fullscreen' | 'maximize';
+    isFullScreen: boolean;
+    isMaximized: boolean;
+  }
+
   type ElectronObsBrowserSourceStatus = import('./types/obsBrowserSource').ObsBrowserSourceStatus;
   type ElectronObsBrowserSourceConfig = import('./types/obsBrowserSource').ObsBrowserSourceConfig;
   type ElectronObsBrowserSourceClock = import('./types/obsBrowserSource').ObsBrowserSourceClock;
@@ -224,7 +230,7 @@ declare global {
   }
 
   type StageActiveEntryKind = 'lyrics' | 'media';
-  type StageSource = 'stage-api' | 'now-playing' | 'playercap' | 'spotify';
+  type StageSource = 'stage-api' | 'now-playing' | 'playercap' | 'spotify' | 'spotify-local';
 
   interface ElectronSpotifyStatus {
     configured: boolean;
@@ -235,6 +241,7 @@ declare global {
     clientId: string;
     redirectUri: string;
     expiresAt: number | null;
+    rateLimitedUntil: number | null;
     scopes: string[];
     error: string | null;
   }
@@ -560,6 +567,8 @@ declare global {
       toggleFullscreenWindow: () => Promise<boolean>;
       closeWindow: () => Promise<boolean>;
       isWindowMaximized: () => Promise<boolean>;
+      getMainWindowState: () => Promise<ElectronMainWindowState>;
+      onMainWindowStateChanged: (callback: (state: ElectronMainWindowState) => void) => () => void;
       getWindowTransparentMode: () => Promise<boolean>;
       setWindowTransparentMode: (
         enabled: boolean,
@@ -593,6 +602,7 @@ declare global {
       connectSpotify: (clientId: string) => Promise<ElectronSpotifyStatus>;
       disconnectSpotify: () => Promise<ElectronSpotifyStatus>;
       getSpotifyPlayback: () => Promise<ElectronSpotifyPlaybackResponse>;
+      getSpotifyLocalPlayback: () => Promise<ElectronSpotifyPlaybackResponse>;
       controlSpotifyPlayback: (command: ElectronSpotifyPlaybackControlCommand) => Promise<ElectronSpotifyPlaybackControlResponse>;
       onSpotifyStatusChanged: (callback: (status: ElectronSpotifyStatus) => void) => () => void;
       getVoiceInputPauseStatus: () => Promise<ElectronVoiceInputPauseStatus>;
@@ -623,6 +633,7 @@ declare global {
       writeVideoExportFile: (filePath: string, data: ArrayBuffer) => Promise<boolean>;
       getStageStatus: () => Promise<StageStatus>;
       setStageEnabled: (enabled: boolean) => Promise<StageStatus>;
+      setStageSource: (source: StageSource) => Promise<StageStatus>;
       regenerateStageToken: () => Promise<StageStatus>;
       clearStageState: () => Promise<StageStatus>;
       completeStageExternalPlayRequest: (result: StageExternalPlayResult) => Promise<boolean>;

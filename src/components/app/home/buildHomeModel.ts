@@ -207,10 +207,15 @@ export const buildHomeModel = ({
                 }
             },
             onStageSourceChange: async (source) => {
-                if (!window.electron?.saveSettings) {
+                if (!window.electron?.setStageSource) {
                     return;
                 }
-                await window.electron.saveSettings('STAGE_MODE_SOURCE', source);
+                try {
+                    const nextStatus = await window.electron.setStageSource(source);
+                    setStageStatus(nextStatus);
+                } catch (error) {
+                    console.error('[buildHomeModel] Failed to change stage source:', error);
+                }
             },
             onRegenerateStageToken: async () => {
                 const nextStatus = await window.electron?.regenerateStageToken();

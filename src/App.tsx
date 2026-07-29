@@ -40,7 +40,7 @@ import {
 } from './components/app/search/searchCollectionAdapters';
 import { buildPlayerPanelModel } from './components/app/player-panel/buildPlayerPanelModel';
 import { createQueueMutations } from './components/app/player-panel/createQueueMutations';
-import { Album, Artist, LyricData, Theme, PlayerState, SongResult, ReplayGainMode, StatusMessage, PlaybackContext, StageLoopMode, UnifiedSong } from './types';
+import { Album, Artist, LyricData, Theme, PlayerState, SongResult, ReplayGainMode, StatusMessage, PlaybackContext, StageLoopMode, UnifiedSong, type StageSource } from './types';
 import type { MediaId, OnlineProviderId, ProviderCollection } from './types/onlineMusic';
 import { resolveSongCatalogRef } from './services/onlineMusic/catalogRefs';
 import { omni } from './services/onlineMusic/omni';
@@ -90,6 +90,7 @@ import { initializeSyncCoordinator } from './services/sync/syncCoordinator';
 import { applyLocalLibraryEntityDisplay } from './services/playbackAdapters';
 import { clearPrefetchRuntime } from './services/prefetchService';
 import { buildLocalLibraryIndex, followEntityRedirect } from './utils/localLibraryIndex';
+import { isExternalStageSource } from './utils/stageSources';
 import type { PlayerChromeVisibilityMode } from './types/remoteControl';
 
 const LOCAL_MUSIC_UPDATED_EVENT = 'folia-local-music-updated';
@@ -986,6 +987,7 @@ export default function App() {
         stageLyricsSession,
         stageMediaSession,
         nowPlayingConnectionStatus,
+        nowPlayingConnectionError,
         nowPlayingTrack,
         nowPlayingLyricPayload,
         nowPlayingProgressMs,
@@ -1923,6 +1925,20 @@ export default function App() {
         await window.electron.setMainWindowAlwaysOnTop(!enabled);
         return true;
     }, []);
+    const setStageSourceFromCommandPalette = useCallback(async (source: StageSource) => {
+        if (!window.electron?.setStageSource) {
+            return false;
+        }
+
+        try {
+            const nextStatus = await window.electron.setStageSource(source);
+            setStageStatus(nextStatus);
+            return true;
+        } catch (error) {
+            console.warn('[CommandPalette] Failed to select Stage source:', error);
+            return false;
+        }
+    }, [setStageStatus]);
     const commandPaletteContext = useMemo(() => ({
         currentSearchSourceTab: currentSearchSourceTabInPalette,
         localSongs,
@@ -1937,6 +1953,7 @@ export default function App() {
         toggleBrowserFullscreen,
         toggleRemoteControlWindow,
         toggleMainWindowAlwaysOnTop,
+        setStageSource: setStageSourceFromCommandPalette,
         setHomeViewTab,
         setPanelTab,
         setIsPanelOpen,
@@ -2034,6 +2051,7 @@ export default function App() {
         toggleBrowserFullscreen,
         toggleRemoteControlWindow,
         toggleMainWindowAlwaysOnTop,
+        setStageSourceFromCommandPalette,
         toggleLoop,
         togglePlay,
         transparentPlayerBackground,
@@ -2065,7 +2083,7 @@ export default function App() {
         context: commandPaletteContext,
     });
     const nowPlayingDebugSnapshot = useMemo(() => (
-        (stageSource === 'now-playing' || stageSource === 'spotify')
+        isExternalStageSource(stageSource)
             ? {
                 connectionStatus: nowPlayingConnectionStatus,
                 isActive: isNowPlayingStageActive,
@@ -2842,6 +2860,7 @@ export default function App() {
         clearPersistedStagePlaybackCache,
         loadStageSessionIntoPlayback,
         nowPlayingConnectionStatus,
+        nowPlayingConnectionError,
         playerCapConnectionStatus,
         playerCapPlayers,
         obsBrowserSourceStatus,
@@ -2860,6 +2879,7 @@ export default function App() {
         leaveStagePlayback,
         loadCurrentSongLyricPreview,
         loadStageSessionIntoPlayback,
+        nowPlayingConnectionError,
         nowPlayingConnectionStatus,
         playerCapConnectionStatus,
         playerCapPlayers,
@@ -3225,12 +3245,14 @@ export default function App() {
                 />
             )}
 
-            {currentView === 'player' && activePlaybackContext === 'stage' && (!stageActiveEntryKind || stageSource === 'now-playing' || stageSource === 'spotify') && !currentSong && (
+            {currentView === 'player' && activePlaybackContext === 'stage' && (!stageActiveEntryKind || isExternalStageSource(stageSource)) && !currentSong && (
                 <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center px-6">
                     <div className={`max-w-lg rounded-3xl border px-6 py-5 text-center backdrop-blur-md ${isDaylight ? 'border-black/10 bg-white/50 text-zinc-800' : 'border-white/10 bg-black/30 text-white'}`}>
                         <div className="text-xs uppercase tracking-[0.22em] opacity-50">
                             {stageSource === 'spotify'
-                                ? 'Stage · Spotify'
+                                ? `Stage · ${t('options.stageSourceSpotifyWebApi')}`
+                                : stageSource === 'spotify-local'
+                                    ? `Stage · ${t('options.stageSourceSpotifyLocal')}`
                                 : stageSource === 'now-playing'
                                     ? 'Stage · Now Playing'
                                 : stageSource === 'playercap'
@@ -3240,6 +3262,8 @@ export default function App() {
                         <div className="mt-3 text-2xl font-semibold">
                             {stageSource === 'spotify'
                                 ? (nowPlayingTrack ? t('options.spotifyNoSyncedLyricsTitle') : t('options.spotifyWaitingTitle'))
+                                : stageSource === 'spotify-local'
+                                    ? (nowPlayingTrack ? t('options.spotifyNoSyncedLyricsTitle') : t('options.spotifyLocalWaitingTitle'))
                                 : stageSource === 'now-playing'
                                 ? t('options.stageSessionEmpty')
                                 : t('options.stageSessionEmpty')}
@@ -3251,6 +3275,12 @@ export default function App() {
                                     : nowPlayingConnectionStatus === 'error'
                                         ? t('options.spotifyConnectionError')
                                         : t('options.spotifyNoPlayback'))
+                                : stageSource === 'spotify-local'
+                                    ? (nowPlayingTrack
+                                        ? t('options.spotifyNoSyncedLyricsDescription')
+                                        : nowPlayingConnectionStatus === 'error'
+                                            ? (nowPlayingConnectionError || t('options.spotifyLocalConnectionError'))
+                                            : t('options.spotifyNoPlayback'))
                                 : stageSource === 'playercap'
                                     ? (playerCapConnectionStatus === 'connected' ? t('options.playerCapWaitingLyrics') : t('options.playerCapConnecting'))
                                     : stageSource === 'now-playing'

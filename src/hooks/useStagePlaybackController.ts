@@ -20,6 +20,8 @@ import {
 } from '../utils/nowPlayingClock';
 import { buildNowPlayingLyricSource } from '../utils/lyrics/nowPlayingSource';
 import { autoMatchBestLyric, hasSynchronizedLyricTimeline } from '../utils/lyrics/autoMatchBestLyric';
+import { isExternalStageSource, isSpotifyStageSource } from '../utils/stageSources';
+import type { ExternalStageSource } from '../utils/stageSources';
 import {
     LyricData,
     NowPlayingConnectionStatus,
@@ -149,6 +151,7 @@ export function useStagePlaybackController({
 }: UseStagePlaybackControllerParams) {
     const [stageStatus, setStageStatus] = useState<StageStatus | null>(null);
     const [nowPlayingConnectionStatus, setNowPlayingConnectionStatus] = useState<NowPlayingConnectionStatus>('disabled');
+    const [nowPlayingConnectionError, setNowPlayingConnectionError] = useState<string | null>(null);
     const [nowPlayingTrack, setNowPlayingTrack] = useState<NowPlayingTrackSnapshot | null>(null);
     const [nowPlayingLyricPayload, setNowPlayingLyricPayload] = useState<NowPlayingLyricPayload | null>(null);
     const [nowPlayingProgressMs, setNowPlayingProgressMs] = useState(0);
@@ -185,6 +188,7 @@ export function useStagePlaybackController({
     const nowPlayingContentLoadKeyRef = useRef<string | null>(null);
     const nowPlayingContentLoadRequestIdRef = useRef(0);
     const nowPlayingPreciseQueryRequestIdRef = useRef(0);
+    const isExternalStageActiveRef = useRef(false);
     const nowPlayingTrackRef = useRef<NowPlayingTrackSnapshot | null>(null);
     const nowPlayingLyricPayloadRef = useRef<NowPlayingLyricPayload | null>(null);
     const nowPlayingProgressMsRef = useRef(0);
@@ -209,9 +213,10 @@ export function useStagePlaybackController({
     const stageSource: StageSource | null = isElectronWindow
         ? (stageStatus?.modeEnabled ? (stageStatus?.source ?? 'stage-api') : null)
         : (enablePlayerCapStage ? 'playercap' : (enableNowPlayingStage ? 'now-playing' : null));
-    const isExternalPlaybackSource = stageSource === 'now-playing' || stageSource === 'spotify';
+    const isExternalPlaybackSource = isExternalStageSource(stageSource);
     const isNowPlayingStageActive = activePlaybackContext === 'stage' && isExternalPlaybackSource;
     const isSpotifyStageActive = activePlaybackContext === 'stage' && stageSource === 'spotify';
+    isExternalStageActiveRef.current = isNowPlayingStageActive;
     const shouldPublishNowPlayingState = isDev || isNowPlayingStageActive;
     shouldPublishNowPlayingStateRef.current = shouldPublishNowPlayingState;
 
@@ -702,7 +707,7 @@ export function useStagePlaybackController({
         track: NowPlayingTrackSnapshot | null,
         lyricPayload: NowPlayingLyricPayload | null,
         requestId: number,
-        source: 'now-playing' | 'spotify',
+        source: ExternalStageSource,
     ) => {
         const durationSec = Math.max(0, (track?.durationMs ?? lyricPayload?.durationMs ?? 0) / 1000);
         if (isDev) {
@@ -727,7 +732,7 @@ export function useStagePlaybackController({
             }
         }
 
-        if (!parsedLyrics && source === 'spotify' && track) {
+        if (!parsedLyrics && isSpotifyStageSource(source) && track) {
             setIsLyricsLoading(true);
             try {
                 const matched = await autoMatchBestLyric(
@@ -751,7 +756,7 @@ export function useStagePlaybackController({
             return;
         }
 
-        const renderableLyrics = source === 'spotify'
+        const renderableLyrics = isSpotifyStageSource(source)
             ? (hasSynchronizedLyricTimeline(parsedLyrics) ? parsedLyrics : null)
             : (hasRenderableLyrics(parsedLyrics) ? parsedLyrics : null);
         const fallbackTitle = track?.title || lyricPayload?.title || 'Now Playing';
@@ -760,7 +765,7 @@ export function useStagePlaybackController({
         const fallbackCoverUrl = track?.coverUrl || null;
         const resolvedDurationSec = durationSec || (renderableLyrics ? getStageLyricsTimelineBounds(renderableLyrics).endTimeSec : 0);
 
-        if (source === 'spotify' && track && !renderableLyrics) {
+        if (isSpotifyStageSource(source) && track && !renderableLyrics) {
             shouldAutoPlayRef.current = false;
             pendingResumeTimeRef.current = null;
             currentSongRef.current = null;
@@ -850,7 +855,7 @@ export function useStagePlaybackController({
 
         setActivePlaybackContext('stage');
 
-        if (handoff.stage.source === 'now-playing' || handoff.stage.source === 'spotify') {
+        if (isExternalStageSource(handoff.stage.source)) {
             const handoffSource = handoff.stage.source;
             const nextNowPlaying = handoff.nowPlaying;
             nowPlayingTrackRef.current = nextNowPlaying.track;
@@ -980,7 +985,7 @@ export function useStagePlaybackController({
         }
 
         if (isExternalPlaybackSource) {
-            const externalSource = stageSource === 'spotify' ? 'spotify' : 'now-playing';
+            const externalSource = stageSource as ExternalStageSource;
             clearMainPlaybackContext();
             stagePlaybackSnapshotRef.current = null;
             setActivePlaybackContext('stage');
@@ -1005,7 +1010,12 @@ export function useStagePlaybackController({
             }
             navigateToPlayer();
             if (!nowPlayingTrackRef.current && !nowPlayingLyricPayloadRef.current) {
-                setStatusMsg({ type: 'info', text: t('status.waitingNowPlayingInput') });
+                setStatusMsg({
+                    type: 'info',
+                    text: isSpotifyStageSource(externalSource)
+                        ? t('options.spotifyNoPlayback')
+                        : t('status.waitingNowPlayingInput'),
+                });
             }
             return;
         }
@@ -1140,6 +1150,7 @@ export function useStagePlaybackController({
             nowPlayingLyricPayloadRef.current = null;
             nowPlayingPausedRef.current = true;
             setNowPlayingConnectionStatus('disabled');
+            setNowPlayingConnectionError(null);
             setNowPlayingTrack(null);
             setNowPlayingLyricPayload(null);
             setNowPlayingProgressMs(0);
@@ -1161,6 +1172,7 @@ export function useStagePlaybackController({
 
         const providerCallbacks = {
             onConnectionStatusChange: setNowPlayingConnectionStatus,
+            onErrorChange: setNowPlayingConnectionError,
             onTrack: (track: NowPlayingTrackSnapshot | null) => {
                 nowPlayingTrackRef.current = track;
                 if (shouldPublishNowPlayingStateRef.current) {
@@ -1198,8 +1210,10 @@ export function useStagePlaybackController({
             },
         };
 
-        const provider = stageSource === 'spotify'
-            ? new SpotifyProvider(providerCallbacks)
+        const provider = isSpotifyStageSource(stageSource)
+            ? new SpotifyProvider(providerCallbacks, {
+                mode: stageSource === 'spotify-local' ? 'local' : 'web-api',
+            })
             : new NowPlayingProvider({
                 ...providerCallbacks,
                 debug: isDev,
@@ -1212,6 +1226,9 @@ export function useStagePlaybackController({
             });
 
         nowPlayingProviderRef.current = provider;
+        if (provider instanceof SpotifyProvider) {
+            provider.setActive(isExternalStageActiveRef.current);
+        }
         provider.start();
 
         return () => {
@@ -1221,6 +1238,13 @@ export function useStagePlaybackController({
             }
         };
     }, [isDev, isExternalPlaybackSource, resetNowPlayingClock, stageSource, updateNowPlayingDebugInfo]);
+
+    useEffect(() => {
+        const provider = nowPlayingProviderRef.current;
+        if (provider instanceof SpotifyProvider) {
+            provider.setActive(isNowPlayingStageActive);
+        }
+    }, [isNowPlayingStageActive, stageSource]);
 
     useEffect(() => {
         if (!isExternalPlaybackSource || !shouldPublishNowPlayingState) {
@@ -1299,7 +1323,7 @@ export function useStagePlaybackController({
             return;
         }
 
-        const externalSource = stageSource === 'spotify' ? 'spotify' : 'now-playing';
+        const externalSource = stageSource as ExternalStageSource;
         const nextContentLoadKey = buildNowPlayingContentLoadKey(nowPlayingTrack, nowPlayingLyricPayload);
         if (!nextContentLoadKey) {
             if (nowPlayingContentLoadKeyRef.current) {
@@ -1508,6 +1532,7 @@ export function useStagePlaybackController({
         stageLyricsSession,
         stageMediaSession,
         nowPlayingConnectionStatus,
+        nowPlayingConnectionError,
         nowPlayingTrack,
         nowPlayingLyricPayload,
         nowPlayingProgressMs,

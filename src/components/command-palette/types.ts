@@ -2,7 +2,7 @@ import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { SearchReturnView, SearchSource } from '../../stores/useSearchNavigationStore';
 import type { LocalLibraryDisplayCatalog } from '../../services/playbackAdapters';
-import type { HomeViewTab, LatentBackgroundTuning, LocalSong, PlayerState, SongResult, StatusMessage, SubtitleContentMode, VisualizerMode, VisualizerBackgroundMode, MonetBackgroundTuning } from '../../types';
+import type { HomeViewTab, LatentBackgroundTuning, LocalSong, PlayerState, SongResult, StageSource, StatusMessage, SubtitleContentMode, VisualizerMode, VisualizerBackgroundMode, MonetBackgroundTuning } from '../../types';
 import type { AppLanguagePreference } from '../../i18n/config';
 import type { PanelTab } from '../UnifiedPanel';
 import type { SettingsModalInitialTab, SettingsSubviewId } from '../../stores/useSettingsUiStore';
@@ -51,6 +51,7 @@ export type CommandPaletteContext = {
     toggleBrowserFullscreen: () => Promise<boolean>;
     toggleRemoteControlWindow: () => Promise<boolean>;
     toggleMainWindowAlwaysOnTop: () => Promise<boolean>;
+    setStageSource: (source: StageSource) => Promise<boolean>;
     setHomeViewTab: (tab: HomeViewTab) => void;
     setPanelTab: (tab: PanelTab) => void;
     setIsPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;

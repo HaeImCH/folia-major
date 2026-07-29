@@ -61,6 +61,7 @@ interface SettingsModalProps {
     onClearStageState?: () => Promise<void> | void;
     onToggleNowPlayingStage?: (enabled: boolean) => Promise<void> | void;
     nowPlayingConnectionStatus?: NowPlayingConnectionStatus;
+    nowPlayingConnectionError?: string | null;
     playerCapConnectionStatus?: PlayerCapConnectionStatus;
     playerCapPlayers?: string[];
     obsBrowserSourceStatus?: ObsBrowserSourceStatus | null;
@@ -111,6 +112,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     onClearStageState,
     onToggleNowPlayingStage,
     nowPlayingConnectionStatus = 'disabled',
+    nowPlayingConnectionError = null,
     playerCapConnectionStatus = 'idle',
     playerCapPlayers = [],
     obsBrowserSourceStatus = null,
@@ -1577,6 +1579,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                                 }}
                                                 stage={{
                                                     nowPlayingConnectionStatus,
+                                                    nowPlayingConnectionError,
                                                     playerCapConnectionStatus,
                                                     playerCapPlayers,
                                                     obsBrowserSourceStatus,

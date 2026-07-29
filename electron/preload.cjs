@@ -46,6 +46,12 @@ contextBridge.exposeInMainWorld('electron', {
     toggleFullscreenWindow: () => ipcRenderer.invoke('window-toggle-fullscreen'),
     closeWindow: () => ipcRenderer.invoke('window-close'),
     isWindowMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+    getMainWindowState: () => ipcRenderer.invoke('window-get-state'),
+    onMainWindowStateChanged: (callback) => {
+        const listener = (_event, state) => callback(state);
+        ipcRenderer.on('main-window-state-changed', listener);
+        return () => ipcRenderer.removeListener('main-window-state-changed', listener);
+    },
     getWindowTransparentMode: () => ipcRenderer.invoke('window-get-transparent-mode'),
     setWindowTransparentMode: (enabled, handoff) => ipcRenderer.invoke('window-set-transparent-mode', enabled, handoff),
     consumeWindowPlaybackHandoff: () => ipcRenderer.invoke('window-playback-handoff-consume'),
@@ -79,6 +85,7 @@ contextBridge.exposeInMainWorld('electron', {
     connectSpotify: (clientId) => ipcRenderer.invoke('spotify-connect', clientId),
     disconnectSpotify: () => ipcRenderer.invoke('spotify-disconnect'),
     getSpotifyPlayback: () => ipcRenderer.invoke('spotify-get-playback'),
+    getSpotifyLocalPlayback: () => ipcRenderer.invoke('spotify-local-get-playback'),
     controlSpotifyPlayback: (command) => ipcRenderer.invoke('spotify-control-playback', command),
     onSpotifyStatusChanged: (callback) => {
         const listener = (_event, status) => callback(status);
@@ -137,6 +144,7 @@ contextBridge.exposeInMainWorld('electron', {
     writeVideoExportFile: (filePath, data) => ipcRenderer.invoke('video-export-write-file', filePath, data),
     getStageStatus: () => ipcRenderer.invoke('stage-get-status'),
     setStageEnabled: (enabled) => ipcRenderer.invoke('stage-set-enabled', enabled),
+    setStageSource: (source) => ipcRenderer.invoke('stage-set-source', source),
     regenerateStageToken: () => ipcRenderer.invoke('stage-regenerate-token'),
     clearStageState: () => ipcRenderer.invoke('stage-clear-state'),
     completeStageExternalPlayRequest: (result) => ipcRenderer.invoke('stage-complete-external-play', result),

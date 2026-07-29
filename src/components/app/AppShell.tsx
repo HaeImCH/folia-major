@@ -40,39 +40,52 @@ const AppShell: React.FC<AppShellProps> = ({
     children,
 }) => {
     const { t } = useTranslation();
-    const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+    const [mainWindowState, setMainWindowState] = useState<ElectronMainWindowState>({
+        expandMode: 'maximize',
+        isFullScreen: false,
+        isMaximized: false,
+    });
 
     useEffect(() => {
-        if (!useCustomWindowRadius || !window.electron?.isWindowMaximized) {
-            setIsWindowMaximized(false);
+        const electron = window.electron;
+        if (!usesCustomWindowChrome || !electron?.getMainWindowState || !electron.onMainWindowStateChanged) {
+            setMainWindowState({ expandMode: 'maximize', isFullScreen: false, isMaximized: false });
             return;
         }
 
         let isCancelled = false;
 
-        const syncMaximizedState = async () => {
+        const syncWindowState = async () => {
             try {
-                const nextValue = await window.electron!.isWindowMaximized();
+                const nextState = await electron.getMainWindowState();
                 if (!isCancelled) {
-                    setIsWindowMaximized(nextValue);
+                    setMainWindowState(nextState);
                 }
             } catch {
                 if (!isCancelled) {
-                    setIsWindowMaximized(false);
+                    setMainWindowState({ expandMode: 'maximize', isFullScreen: false, isMaximized: false });
                 }
             }
         };
 
-        void syncMaximizedState();
-        window.addEventListener('resize', syncMaximizedState);
+        const unsubscribe = electron.onMainWindowStateChanged(nextState => {
+            if (!isCancelled) {
+                setMainWindowState(nextState);
+            }
+        });
+        void syncWindowState();
 
         return () => {
             isCancelled = true;
-            window.removeEventListener('resize', syncMaximizedState);
+            unsubscribe();
         };
-    }, [useCustomWindowRadius]);
+    }, [usesCustomWindowChrome]);
 
-    const shouldApplyWindowRadius = useCustomWindowRadius && !isWindowMaximized;
+    const isExpandControlActive = mainWindowState.expandMode === 'fullscreen'
+        ? mainWindowState.isFullScreen
+        : mainWindowState.isMaximized;
+    const hasExpandedWindowBounds = mainWindowState.isMaximized || mainWindowState.isFullScreen;
+    const shouldApplyWindowRadius = useCustomWindowRadius && !hasExpandedWindowBounds;
     const areTitlebarControlsVisible = isTitlebarRevealed || alwaysShowMainWindowTitlebar;
     const shouldRenderTitlebarBackdrop = !isPlayerView || (useCustomWindowRadius && !isMainWindowClickThroughEnabled);
     const titlebarBackdropClassName = `absolute inset-0 backdrop-blur-sm ${
@@ -137,6 +150,8 @@ const AppShell: React.FC<AppShellProps> = ({
                         <div className="pointer-events-auto absolute top-0 right-0 z-10 h-full">
                             <WindowControls
                                 revealed={areTitlebarControlsVisible}
+                                isExpanded={isExpandControlActive}
+                                expandMode={mainWindowState.expandMode}
                                 isDaylight={isDaylight}
                                 isMainWindowClickThroughEnabled={isMainWindowClickThroughEnabled}
                             />
