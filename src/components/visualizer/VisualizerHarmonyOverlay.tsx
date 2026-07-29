@@ -173,7 +173,7 @@ const VisualizerHarmonyOverlay: React.FC<VisualizerHarmonyOverlayProps> = ({
     showSubtitleTranslation = true,
     subtitleContentMode,
     showHarmonySubtitle = true,
-    harmonySubtitleBackground = false,
+    harmonySubtitleBackground = true,
     subtitleFontScale = 1,
 }) => {
     const backgroundVocals = useMemo(() => getLyricsBackgroundVocals(lines), [lines]);
@@ -219,9 +219,21 @@ const VisualizerHarmonyOverlay: React.FC<VisualizerHarmonyOverlayProps> = ({
                     style={{ top: harmonyTopPx }}
                 >
                     <div
-                        className={`flex max-w-full flex-col items-center gap-1.5 ${harmonySubtitleBackground ? 'rounded-2xl px-4 py-2' : ''}`}
-                        style={harmonySubtitleBackground ? { backgroundColor: colorWithAlpha(theme.backgroundColor, 0.45) } : undefined}
+                        className={`relative isolate flex max-w-full flex-col items-center gap-1.5 ${harmonySubtitleBackground ? 'px-4 py-2' : ''}`}
                     >
+                    {harmonySubtitleBackground && (
+                        // Keep the glow out of the masked text's negative/filter compositing path on iOS Safari.
+                        <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute -inset-x-10 -inset-y-6 z-0 blur-2xl"
+                            style={{
+                                background: `radial-gradient(ellipse at center, ${colorWithAlpha(theme.backgroundColor, 0.7)} 0%, ${colorWithAlpha(theme.backgroundColor, 0.42)} 48%, transparent 78%)`,
+                                transform: 'translateZ(0)',
+                                WebkitTransform: 'translateZ(0)',
+                                WebkitBackfaceVisibility: 'hidden',
+                            }}
+                        />
+                    )}
                     {snapshot.lines.map(entry => {
                         const alternateText = hideTranslationSubtitle
                             ? null
@@ -237,7 +249,7 @@ const VisualizerHarmonyOverlay: React.FC<VisualizerHarmonyOverlayProps> = ({
                             initial={{ opacity: 0, scale: 0.97 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.97 }}
-                            className="max-w-4xl overflow-visible whitespace-pre-wrap break-words"
+                            className="relative z-10 max-w-4xl overflow-visible whitespace-pre-wrap break-words"
                         >
                             <HarmonyGlowText vocal={entry.vocal} currentTime={currentTime} theme={subtitleTheme ?? theme} subtitleFontScale={subtitleFontScale} />
                             {alternateText && (

@@ -197,6 +197,7 @@ export default {
     ],
     "destination": "命令台",
     "close": "关闭命令台",
+    "runPinnedCommand": "执行快捷命令：{{command}}",
     "empty": "没有匹配的命令",
     "syncNotConfigured": "同步服务尚未开启，请先在存储设置中完成配置并启用同步。",
     "run": "执行",
@@ -226,8 +227,9 @@ export default {
       "show-user-guide": { "title": "打开用户指引", "description": "查看应用使用指南" },
       "settings-options": { "title": "打开选项", "description": "打开设置中心" },
       "settings-appearance": { "title": "外观设置", "description": "打开视觉和外观设置" },
-      "settings-general": { "title": "通用设置", "description": "打开全局应用偏好" },
+      "settings-general": { "title": "界面设置", "description": "打开全局应用偏好" },
       "settings-playback": { "title": "播放设置", "description": "打开播放行为设置" },
+      "settings-local-lyrics-priority": { "title": "本地歌曲歌词优先级", "description": "选择本地歌曲优先使用本地或在线歌词" },
       "settings-integration": { "title": "集成设置", "description": "打开 Stage、Spotify、Now Playing 和 Navidrome 设置" },
       "settings-spotify": { "title": "Spotify 集成", "description": "配置并连接 Spotify" },
       "settings-discord-presence": { "title": "Discord 播放状态", "description": "打开 Discord Rich Presence 设置" },
@@ -545,7 +547,7 @@ export default {
   "options": {
     "refresh": "刷新",
     "cacheDetails": "缓存详情",
-    "generalSettings": "通用设置",
+    "generalSettings": "界面设置",
     "generalSettingsDesc": "界面语言等全局应用偏好。",
     "visualSettingsCardDesc": "主题、歌词渲染模式、样式入口和背景透明度。",
     "visualSettingsPanelDesc": "主题、歌词渲染和背景外观。",
@@ -574,6 +576,10 @@ export default {
     "showHomeTabRadio": "显示电台",
     "showHomeTabAlbums": "显示专辑",
     "showHomeTabLocal": "显示本地",
+    "pinnedCommands": "快捷命令",
+    "pinnedCommandsDesc": "选择最多三个显示在命令窗口下方的快捷命令。",
+    "pinnedCommandSlot": "栏位 {{index}}",
+    "pinnedCommandNone": "不固定命令",
     "playlistData": "歌单数据",
     "lyrics": "歌词",
     "covers": "封面",
@@ -650,6 +656,12 @@ export default {
     "autoUseBestLyricDesc": "自动检索网易云、AMLLDB、QQ 和酷狗歌词，若存在完美匹配的逐字歌词则自动优先采用。",
     "lyricMatchPriority": "歌词匹配优先级",
     "lyricMatchPriorityDesc": "在多个歌词源都存在匹配度满足要求的歌词时，优先选择该歌词源的结果。",
+    "localLyricsPriority": "本地歌曲歌词优先级",
+    "localLyricsPriorityDesc": "本地歌曲同时存在在线匹配歌词时，选择优先使用的歌词。手动指定的歌词来源不受影响。",
+    "localLyricsPriorityLocal": "本地歌词",
+    "localLyricsPriorityLocalDesc": "优先使用同目录和内嵌歌词，缺失时再使用在线歌词。",
+    "localLyricsPriorityOnline": "在线优先",
+    "localLyricsPriorityOnlineDesc": "优先使用已匹配的在线歌词，缺失时再使用本地歌词。",
     "labHidePlayerUi": "隐藏播放页 UI",
     "labHidePlayerUiDesc": "仅对播放页生效。可分别隐藏底部控制条、底部字幕和右侧按钮；隐藏右侧按钮后仍可使用 P 键打开或关闭右侧面板。",
     "alwaysShowPlayerBackButton": "始终显示播放页左上角返回按钮",
@@ -759,6 +771,7 @@ export default {
     "regenerateObsBrowserSourceToken": "重新生成 Token",
     "obsBrowserSourceClients": "连接数",
     "visualSettings": "视觉设置",
+    "daylightMode": "明暗模式",
     "lyricsRenderer": "歌词动画",
     "lyricsRendererDesc": "选择播放页使用的歌词动画模式。",
     "lyricsAnimationAdjust": "歌词动画样式",
@@ -789,13 +802,18 @@ export default {
     "previewSubtitleSettings": "字幕",
     "previewSubtitleHotspot": "字幕设置",
     "previewSubtitleSettingsDesc": "调整底部译文和下一句提示的显示方式。",
+    "previewText": "预览文本",
+    "previewTextDefault": "神文之诗",
+    "previewTextReserved": "野芝麻",
+    "pausePreview": "暂停预览",
+    "resumePreview": "继续预览",
     "subtitleOverlayOpacity": "字幕透明度",
     "subtitleOverlayBackground": "字幕背景",
-    "subtitleOverlayBackgroundDesc": "为底部字幕添加主题自适应的半透明背景，提高复杂画面中的可读性。",
+    "subtitleOverlayBackgroundDesc": "为底部字幕添加主题自适应的柔和扩散光晕，提高复杂画面中的可读性。",
     "showHarmonySubtitle": "显示和声字幕",
     "showHarmonySubtitleDesc": "显示或隐藏顶部的和声歌词层。",
     "harmonySubtitleBackground": "和声字幕背景",
-    "harmonySubtitleBackgroundDesc": "为和声字幕添加固定 50% 透明度的背景。",
+    "harmonySubtitleBackgroundDesc": "为和声字幕添加柔和扩散的光晕背景。",
     "harmonySubtitleSettings": "和声字幕",
     "harmonySubtitleSettingsDesc": "调整顶部和声歌词层的显示方式。",
     "showSubtitleTranslation": "显示翻译",
@@ -1232,6 +1250,25 @@ export default {
     "noDescription": "暂无详细介绍",
   },
   "releaseNotes": {
+    "v0_6_5": {
+      "intro": "以下是 0.6.7 的新功能与改进",
+      "lyricPreview": {
+        "title": "歌词动画预览改进",
+        "description": "歌词动画样式设置新增预览窗口暂停功能，并提供一套全新的占位符歌词。"
+      },
+      "responseSmoothness": {
+        "title": "响应流畅度优化",
+        "description": "优化多个组件的响应表现，让界面交互与动态更新更加流畅。"
+      },
+      "commandPaletteV2": {
+        "title": "命令面板 v2",
+        "description": "可在界面设置中固定常用功能，并扩展命令记忆能力。"
+      },
+      "commandPaletteQueue": {
+        "title": "命令面板播放队列",
+        "description": "可直接在命令面板中使用“队列”命令管理播放队列。"
+      }
+    },
     "v0_6_3": {
       "intro": "以下是最新版本的新功能与改进",
       "pendoloTheme": {

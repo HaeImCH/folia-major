@@ -351,6 +351,33 @@
       "contributions": [
         "ideas"
       ]
+    },
+    {
+      "login": "MGPzhmyx",
+      "name": "MGPzhmyx",
+      "avatar_url": "https://avatars.githubusercontent.com/u/191600833?v=4",
+      "profile": "https://github.com/MGPzhmyx",
+      "contributions": [
+        "bug"
+      ]
+    },
+    {
+      "login": "sanchendumeng",
+      "name": "散尘渡梦",
+      "avatar_url": "https://avatars.githubusercontent.com/u/48471389?v=4",
+      "profile": "https://github.com/sanchendumeng",
+      "contributions": [
+        "ideas"
+      ]
+    },
+    {
+      "login": "Errorname1",
+      "name": "Errorname1",
+      "avatar_url": "https://avatars.githubusercontent.com/u/118788659?v=4",
+      "profile": "https://github.com/Errorname1",
+      "contributions": [
+        "bug"
+      ]
     }
   ],
   "commit": false,

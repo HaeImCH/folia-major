@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { LucideIcon } from 'lucide-react';
 import type { SearchReturnView, SearchSource } from '../../stores/useSearchNavigationStore';
 import type { LocalLibraryDisplayCatalog } from '../../services/playbackAdapters';
 import type { HomeViewTab, LatentBackgroundTuning, LocalSong, PlayerState, SongResult, StatusMessage, SubtitleContentMode, VisualizerMode, VisualizerBackgroundMode, MonetBackgroundTuning } from '../../types';
@@ -19,10 +20,13 @@ export type CommandPaletteCommand = {
     title: string;
     description: string;
     textSource?: 'i18n' | 'runtime';
+    icon?: LucideIcon;
     keywords: string[];
     placeholder?: string;
     requiresInput?: boolean;
     getPreview?: (input: string, context: CommandPaletteContext) => string | null;
+    queueIndex?: number;
+    queueSong?: SongResult;
     execute: (input: string, context: CommandPaletteContext) => Promise<boolean> | boolean;
 };
 

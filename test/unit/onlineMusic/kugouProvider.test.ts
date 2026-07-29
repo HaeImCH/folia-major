@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // test/unit/onlineMusic/kugouProvider.test.ts
 
 const requestMock = vi.hoisted(() => vi.fn());
+const anonymousSearchMock = vi.hoisted(() => vi.fn());
+const transportState = vi.hoisted(() => ({ hasAuthenticatedSearchSession: true }));
 
 vi.mock('@/services/onlineMusic/kugouTransport', () => ({
     getKugouTransportAvailability: () => ({ configured: false, reason: 'not-configured' }),
+    hasKugouAuthenticatedSearchSession: () => transportState.hasAuthenticatedSearchSession,
+    requestKugouAnonymousSearch: anonymousSearchMock,
     requestKugou: requestMock,
 }));
 
@@ -22,7 +26,71 @@ import {
 import { resolveSongCatalogRef } from '@/services/onlineMusic/catalogRefs';
 
 describe('kugouProvider', () => {
-    beforeEach(() => requestMock.mockReset());
+    beforeEach(() => {
+        vi.useRealTimers();
+        requestMock.mockReset();
+        anonymousSearchMock.mockReset();
+        transportState.hasAuthenticatedSearchSession = true;
+    });
+
+    it('uses anonymous signed search when no authenticated KuGou session exists', async () => {
+        transportState.hasAuthenticatedSearchSession = false;
+        anonymousSearchMock.mockResolvedValue({
+            data: {
+                lists: [
+                    {
+                        FileHash: 'anonymous-hash',
+                        SongName: '爱河',
+                        Singers: [{ id: 7, name: '神马乐团' }],
+                        Duration: 226,
+                    },
+                    {
+                        FileHash: 'anonymous-hash',
+                        SongName: '爱河（重复结果）',
+                        Singers: [{ id: 7, name: '神马乐团' }],
+                        Duration: 226,
+                    },
+                ],
+            },
+        });
+
+        const page = await kugouProvider.search!.searchSongs('爱河', 50, 0);
+
+        expect(anonymousSearchMock).toHaveBeenCalledWith('爱河', 1, 50);
+        expect(requestMock).not.toHaveBeenCalled();
+        expect(page.items[0]).toMatchObject({
+            id: 'ANONYMOUS-HASH',
+            name: '爱河',
+            durationMs: 226_000,
+        });
+        expect(page.items).toHaveLength(1);
+        expect(page.nextOffset).toBe(2);
+    });
+
+    it('keeps authenticated searches on the provider transport', async () => {
+        requestMock.mockResolvedValue({
+            data: {
+                lists: [{
+                    FileHash: 'authenticated-hash',
+                    SongName: '爱河',
+                    Singers: [{ id: 7, name: '神马乐团' }],
+                    Duration: 226,
+                }],
+            },
+        });
+
+        const page = await kugouProvider.search!.searchSongs('爱河', 50, 0);
+
+        expect(requestMock).toHaveBeenCalledWith('search', {
+            keywords: '爱河',
+            keyword: '爱河',
+            type: 'song',
+            page: 1,
+            pagesize: 50,
+        });
+        expect(anonymousSearchMock).not.toHaveBeenCalled();
+        expect(page.items[0]?.id).toBe('AUTHENTICATED-HASH');
+    });
 
     it('normalizes Hash identity and keeps only stable provider data', () => {
         const song = normalizeKugouSong({
@@ -226,7 +294,9 @@ describe('kugouProvider', () => {
         expect(requestMock).toHaveBeenNthCalledWith(3, 'user_vip_detail', { userid: '123' });
     });
 
-    it('claims daily VIP via youth_day_vip when youth_union_vip is not VIP', async () => {
+    it('claims and upgrades daily VIP with the current China calendar date', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-07-29T16:30:00Z'));
         requestMock
             .mockResolvedValueOnce({
                 data: { userid: '123', nickname: 'Kugou User', vip_type: 0 },
@@ -238,14 +308,42 @@ describe('kugouProvider', () => {
                 data: { status: 1, msg: 'success' },
             })
             .mockResolvedValueOnce({
-                data: { is_vip: 0, vip_type: 0 },
+                status: 1, error_code: 0, data: { recharge_hours: 24 },
+            })
+            .mockResolvedValueOnce({
+                data: { is_vip: 0, vip_type: 0, busi_vip: [{ is_vip: 1, busi_type: 'concept' }] },
             });
 
         await expect(kugouProvider.auth?.getLoginStatus()).resolves.toMatchObject({
             id: '123', nickname: 'Kugou User', vipType: 1,
         });
         expect(requestMock).toHaveBeenNthCalledWith(2, 'youth_union_vip', expect.objectContaining({ userid: '123' }));
-        expect(requestMock).toHaveBeenNthCalledWith(3, 'youth_day_vip', expect.objectContaining({ userid: '123' }));
+        expect(requestMock).toHaveBeenNthCalledWith(3, 'youth_day_vip', expect.objectContaining({
+            userid: '123', receive_day: '2026-07-30',
+        }));
+        expect(requestMock).toHaveBeenNthCalledWith(4, 'youth_day_vip_upgrade', expect.objectContaining({ userid: '123' }));
+        expect(requestMock).toHaveBeenNthCalledWith(5, 'user_vip_detail', { userid: '123' });
+    });
+
+    it('does not upgrade or report daily VIP when the claim response fails', async () => {
+        requestMock
+            .mockResolvedValueOnce({
+                data: { userid: '123', nickname: 'Kugou User', vip_type: 0 },
+            })
+            .mockResolvedValueOnce({
+                data: { is_vip: 0 },
+            })
+            .mockResolvedValueOnce({
+                status: 0, error_code: 500, error_msg: 'claim failed',
+            })
+            .mockResolvedValueOnce({
+                data: { is_vip: 0, vip_type: 0 },
+            });
+
+        await expect(kugouProvider.auth?.getLoginStatus()).resolves.toMatchObject({
+            id: '123', nickname: 'Kugou User', vipType: 0,
+        });
+        expect(requestMock).not.toHaveBeenCalledWith('youth_day_vip_upgrade', expect.anything());
         expect(requestMock).toHaveBeenNthCalledWith(4, 'user_vip_detail', { userid: '123' });
     });
 

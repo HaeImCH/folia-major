@@ -10,6 +10,26 @@ import { getReplayGainModeLabel } from '../utils/appPlaybackHelpers';
 
 const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
 
+type PlayerEscapeAction = 'ignore' | 'allow-fullscreen-exit' | 'close-panel' | 'navigate-back';
+
+export const resolvePlayerEscapeAction = ({
+    currentView,
+    hasBlockingWindow,
+    isFullscreen,
+    isPanelOpen,
+    isRepeat,
+}: {
+    currentView: string;
+    hasBlockingWindow: boolean;
+    isFullscreen: boolean;
+    isPanelOpen: boolean;
+    isRepeat: boolean;
+}): PlayerEscapeAction => {
+    if (currentView !== 'player' || hasBlockingWindow || isRepeat) return 'ignore';
+    if (isFullscreen) return 'allow-fullscreen-exit';
+    return isPanelOpen ? 'close-panel' : 'navigate-back';
+};
+
 type UsePlaybackInteractionBridgeParams = {
     isDev: boolean;
     currentSong: SongResult | null;
@@ -41,6 +61,7 @@ type UsePlaybackInteractionBridgeParams = {
     handleToggleLoopMode: () => void;
     seekSpotify: (timeSec: number) => Promise<void>;
     toggleSpotifyLoop: () => Promise<void>;
+    navigateBackFromPlayer: () => void;
     pausePlayback: () => void;
     resumePlayback: () => Promise<void>;
     syncStageLyricsClock: (timeSec: number, endTimeSec: number, nextPlayerState: PlayerState, startTimeSec?: number) => void;
@@ -73,6 +94,7 @@ export function usePlaybackInteractionBridge({
     handleToggleLoopMode,
     seekSpotify,
     toggleSpotifyLoop,
+    navigateBackFromPlayer,
     pausePlayback,
     resumePlayback,
     syncStageLyricsClock,
@@ -172,6 +194,24 @@ export function usePlaybackInteractionBridge({
             }
 
             switch (event.code) {
+                case 'Escape': {
+                    const action = resolvePlayerEscapeAction({
+                        currentView,
+                        hasBlockingWindow: hasBlockingWindow(),
+                        isFullscreen: Boolean(document.fullscreenElement),
+                        isPanelOpen,
+                        isRepeat: event.repeat,
+                    });
+                    if (action === 'ignore' || action === 'allow-fullscreen-exit') return;
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    if (action === 'close-panel') {
+                        setIsPanelOpen(false);
+                        return;
+                    }
+                    navigateBackFromPlayer();
+                    break;
+                }
                 case 'Space':
                     if (currentSong && (audioSrc || isNowPlayingStageActive || (activePlaybackContext === 'stage' && stageActiveEntryKind === 'lyrics'))) {
                         event.preventDefault();
@@ -284,6 +324,7 @@ export function usePlaybackInteractionBridge({
         isNowPlayingStageActive,
         isSpotifyStageActive,
         isPanelOpen,
+        navigateBackFromPlayer,
         pausePlayback,
         playerState,
         resumePlayback,

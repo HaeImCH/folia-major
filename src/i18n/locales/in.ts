@@ -736,14 +736,14 @@ export default {
     "previewSubtitleSettingsDesc": "Sesuaikan lapisan subtitle bawah, teks terjemahan, dan overlay baris berikutnya.",
     "subtitleOverlayOpacity": "Opasitas Subtitle",
     "subtitleOverlayBackground": "Latar Subtitle",
-    "subtitleOverlayBackgroundDesc": "Tambahkan latar transparan yang mengikuti tema agar subtitle lebih mudah dibaca.",
+    "subtitleOverlayBackgroundDesc": "Tambahkan halo lembut yang mengikuti tema agar subtitle lebih mudah dibaca.",
     "showSubtitleTranslation": "Tampilkan Terjemahan",
     "showSubtitleTranslationDesc": "Mengontrol teks terjemahan di Monet dan overlay subtitle bawah.",
     "subtitleContentMode": "Konten Subtitle",
     "showHarmonySubtitle": "Tampilkan Subtitle Harmoni",
     "showHarmonySubtitleDesc": "Tampilkan atau sembunyikan overlay lirik harmoni di bagian atas.",
     "harmonySubtitleBackground": "Latar Subtitle Harmoni",
-    "harmonySubtitleBackgroundDesc": "Tambahkan latar tetap dengan opasitas 50% di belakang subtitle harmoni.",
+    "harmonySubtitleBackgroundDesc": "Tambahkan halo lembut yang menyebar di belakang subtitle harmoni.",
     "classicSettings": "Penyetelan Classic",
     "classicSettingsDesc": "Kontrol rotasi per-kata dan rentang float breathing seluruh baris.",
     "classicWordRotation": "Rotasi Per-kata",
@@ -1098,6 +1098,25 @@ export default {
     "noDescription": "Tidak ada deskripsi tersedia",
   },
   "releaseNotes": {
+    "v0_6_5": {
+      "intro": "Berikut fitur dan peningkatan baru pada versi 0.6.7.",
+      "lyricPreview": {
+        "title": "Pratinjau Animasi Lirik yang Ditingkatkan",
+        "description": "Pengaturan gaya animasi lirik kini memiliki kontrol jeda untuk pratinjau dan satu set lirik placeholder baru."
+      },
+      "responseSmoothness": {
+        "title": "Respons yang Lebih Lancar",
+        "description": "Respons beberapa komponen dioptimalkan agar interaksi dan pembaruan dinamis terasa lebih lancar."
+      },
+      "commandPaletteV2": {
+        "title": "Palet Perintah v2",
+        "description": "Sematkan fitur yang sering digunakan di pengaturan Tampilan dan gunakan memori perintah yang diperluas."
+      },
+      "commandPaletteQueue": {
+        "title": "Antrean Pemutaran di Palet Perintah",
+        "description": "Kelola antrean pemutaran langsung di Palet Perintah dengan perintah Antrean."
+      }
+    },
     "v0_6_3": {
       "intro": "Berikut adalah fitur dan peningkatan baru pada versi terbaru.",
       "pendoloTheme": {

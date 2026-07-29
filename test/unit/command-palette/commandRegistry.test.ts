@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PlayerState } from '../../../src/types';
-import { COMMAND_PALETTE_COMMANDS, getCommandPaletteMatches } from '../../../src/components/command-palette/commandRegistry';
+import { PlayerState, type SongResult } from '../../../src/types';
+import { COMMAND_PALETTE_COMMANDS, getCommandPaletteMatches, getQueueSongMatches } from '../../../src/components/command-palette/commandRegistry';
 import type { CommandPaletteContext } from '../../../src/components/command-palette/types';
 
 const createContext = (overrides: Partial<CommandPaletteContext> = {}): CommandPaletteContext => ({
@@ -103,6 +103,16 @@ describe('command palette registry', () => {
         expect(context.openSettings).toHaveBeenCalledWith('options', 'integration');
     });
 
+    it('opens the local lyrics priority setting from the command palette', () => {
+        const context = createContext();
+        const [match] = getCommandPaletteMatches('在线优先');
+
+        expect(match.command.id).toBe('settings-local-lyrics-priority');
+        match.command.execute(match.input, context);
+
+        expect(context.openSettings).toHaveBeenCalledWith('options', 'playback');
+    });
+
     it('matches sync server settings and manual sync commands', () => {
         expect(getCommandPaletteMatches('sync server')[0].command.id).toBe('settings-r2-sync');
         expect(getCommandPaletteMatches('立即同步')[0].command.id).toBe('sync-now');
@@ -161,6 +171,26 @@ describe('command palette registry', () => {
         expect(match.command.id).toBe('search-current');
         expect(match.input).toBe('');
         expect(match.command.getPreview?.(match.input, context)).toBeNull();
+    });
+
+    it('keeps the complete queue available for virtualization and preserves queue search', () => {
+        const playQueue = Array.from({ length: 24 }, (_, index): SongResult => ({
+            id: index + 1,
+            name: index === 17 ? 'Needle Song' : `Queue Song ${index + 1}`,
+            artists: [{ id: index + 1, name: `Artist ${index + 1}` }],
+            album: { id: index + 1, name: `Album ${index + 1}` },
+            durationMs: 180_000,
+        }));
+        const context = createContext({ playQueue });
+
+        const fullQueue = getQueueSongMatches('', context);
+        const filteredQueue = getQueueSongMatches('needle', context);
+
+        expect(fullQueue).toHaveLength(playQueue.length);
+        expect(fullQueue[17].command.queueIndex).toBe(17);
+        expect(fullQueue[17].command.queueSong).toBe(playQueue[17]);
+        expect(filteredQueue).toHaveLength(1);
+        expect(filteredQueue[0].command.queueIndex).toBe(17);
     });
 
     it('matches commands by Chinese keyword and pinyin', () => {
@@ -384,6 +414,24 @@ describe('command palette registry', () => {
 
     it('limits suggestions to ten commands', () => {
         expect(getCommandPaletteMatches('')).toHaveLength(10);
+    });
+
+    it('allows recent input commands to fill the ten-command landing list', () => {
+        const recentIds = [
+            'queue',
+            'search-current',
+            'playback-prev',
+            'playback-next',
+            'playback-pause',
+            'playback-play',
+            'playback-loop',
+            'playback-shuffle',
+            'panel-queue',
+            'settings-general',
+        ];
+
+        expect(getCommandPaletteMatches('', createContext(), recentIds).map(match => match.command.id))
+            .toEqual(recentIds);
     });
 
     it('matches and executes background and visualizer monet switching commands', () => {

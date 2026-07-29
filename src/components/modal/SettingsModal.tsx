@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Command, MousePointer2, Keyboard, Settings2, Trash2, Database, Monitor, PlayCircle, Loader2, Server, Check, AlertCircle, FlaskConical, ChevronLeft, ChevronRight, RefreshCw, Download, ExternalLink, Sparkles, Palette, CircleHelp, Languages } from 'lucide-react';
+import { X, Command, MousePointer2, Keyboard, Settings2, Trash2, Database, Monitor, PlayCircle, Loader2, Server, Check, AlertCircle, FlaskConical, ChevronLeft, ChevronRight, RefreshCw, Download, ExternalLink, Sparkles, Palette, CircleHelp, Languages, Moon, Sun } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getCacheUsageByCategory, clearCacheByCategory, clearAllData } from '../../services/db';
 import { DualTheme, StageStatus, StageSource, Theme, ThemeMode, type CadenzaTuning, type CappellaEmojiImage, type CappellaTuning, type FumeTuning, type NowPlayingConnectionStatus, type PartitaTuning, type TiltTuning, type StoredCustomLyricsFont, type VisualizerMode } from '../../types';
@@ -24,8 +24,12 @@ import type { LyricData } from '../../types';
 import { selectSettingsUiSnapshot, type SettingsSubviewId, type VisualizerSettingsSection, useSettingsUiStore } from '../../stores/useSettingsUiStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { ObsBrowserSourceStatus } from '../../types/obsBrowserSource';
+import { getWebAiProvider } from '../../services/runtimeConfig';
 
 const DEFAULT_OPENAI_TEMPERATURE = '0.7';
+const VERSION_INFO = __DOCKER_STACK_VERSION__
+    ? `${__APP_VERSION_LABEL__} v${__APP_VERSION__} · Stack ${__DOCKER_STACK_VERSION__} · ${__COMMIT_HASH__}`
+    : `${__APP_VERSION_LABEL__} v${__APP_VERSION__} - ${__GIT_BRANCH__} - ${__COMMIT_HASH__}`;
 
 interface SettingsModalProps {
     onClose: () => void;
@@ -147,6 +151,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         visualizerOpacity,
         visualizerBackgroundMode,
         isDaylight,
+        setDaylightPreference: onSetDaylightPreference,
         visualizerMode,
         grid3dCardStyle,
         classicTuning,
@@ -375,7 +380,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     const [cacheDirectoryIsDefault, setCacheDirectoryIsDefault] = useState(true);
     const [cacheDirectoryStatus, setCacheDirectoryStatus] = useState<'idle' | 'choosing'>('idle');
     const [stageActionStatus, setStageActionStatus] = useState<'idle' | 'regenerating'>('idle');
-    const configuredAiProvider = isElectron ? electronSettings.AI_PROVIDER : import.meta.env.VITE_AI_PROVIDER;
+    const configuredAiProvider = isElectron ? electronSettings.AI_PROVIDER : getWebAiProvider();
     const aiServiceLabel = configuredAiProvider === 'openai' ? 'OpenAI Compatible' : 'Google Gemini';
     const showQuarkDownload = electronSettings.UPDATE_CHANNEL === 'realeco';
     useEffect(() => {
@@ -458,10 +463,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     };
 
     const handleCopyVersionInfo = async () => {
-        const versionInfo = `${__APP_VERSION_LABEL__} v${__APP_VERSION__} - ${__GIT_BRANCH__} - ${__COMMIT_HASH__}`;
-
         try {
-            await copyText(versionInfo);
+            await copyText(VERSION_INFO);
             setVersionCopied(true);
             window.setTimeout(() => setVersionCopied(false), 1800);
         } catch (error) {
@@ -1323,7 +1326,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                         >
                                             {versionCopied
                                                 ? t('status.copied')
-                                                : `${__APP_VERSION_LABEL__} v${__APP_VERSION__} - ${__GIT_BRANCH__} - ${__COMMIT_HASH__}`}
+                                                : VERSION_INFO}
                                         </button>
 
                                         {/* 第二行：发现新版本与操作按钮 */}
@@ -1454,24 +1457,40 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                 </div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar pl-1 md:pl-2 pr-2 md:pr-4 relative pb-4">
                                     <div className="mb-4 md:mb-6 border-b border-white/10 pb-3 md:pb-4">
-                                        <h2 className="text-lg md:text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-                                            {activeSettingsSection === 'appearance' && (t('options.visualSettings') || "Visual Settings")}
-                                            {activeSettingsSection === 'general' && (t('options.generalSettings') || "General Settings")}
-                                            {activeSettingsSection === 'playback' && (t('options.playbackSettings') || "Playback Settings")}
-                                            {activeSettingsSection === 'integration' && (t('options.integrationSettings') || "Integration Settings")}
-                                            {activeSettingsSection === 'storage' && (t('options.storageSettings') || "Storage Settings")}
-                                            {activeSettingsSection === 'desktop' && (t('options.desktopSettings') || "Desktop Settings")}
-                                            {activeSettingsSection === 'lab' && (t('options.labSettings') || "Lab Settings")}
-                                        </h2>
-                                        <p className="text-xs opacity-50 mt-1" style={{ color: 'var(--text-secondary)' }}>
-                                            {activeSettingsSection === 'appearance' && (t('options.visualSettingsPanelDesc') || "Customize the look and feel of Folia.")}
-                                            {activeSettingsSection === 'general' && (t('options.generalSettingsDesc') || "Basic application preferences.")}
-                                            {activeSettingsSection === 'playback' && (t('options.playbackSettingsPanelDesc') || "Audio output and playback behavior.")}
-                                            {activeSettingsSection === 'integration' && (t('options.integrationSettingsDesc') || "Connect with external services.")}
-                                            {activeSettingsSection === 'storage' && (t('options.storageSettingsPanelDesc') || "Manage cache and local data.")}
-                                            {activeSettingsSection === 'desktop' && (t('options.desktopSettingsPanelDesc') || "System integration and updates.")}
-                                            {activeSettingsSection === 'lab' && (t('options.labSettingsDesc') || "Experimental features.")}
-                                        </p>
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div>
+                                                <h2 className="text-lg md:text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                                    {activeSettingsSection === 'appearance' && (t('options.visualSettings') || "Visual Settings")}
+                                                    {activeSettingsSection === 'general' && (t('options.generalSettings') || "General Settings")}
+                                                    {activeSettingsSection === 'playback' && (t('options.playbackSettings') || "Playback Settings")}
+                                                    {activeSettingsSection === 'integration' && (t('options.integrationSettings') || "Integration Settings")}
+                                                    {activeSettingsSection === 'storage' && (t('options.storageSettings') || "Storage Settings")}
+                                                    {activeSettingsSection === 'desktop' && (t('options.desktopSettings') || "Desktop Settings")}
+                                                    {activeSettingsSection === 'lab' && (t('options.labSettings') || "Lab Settings")}
+                                                </h2>
+                                                <p className="text-xs opacity-50 mt-1" style={{ color: 'var(--text-secondary)' }}>
+                                                    {activeSettingsSection === 'appearance' && (t('options.visualSettingsPanelDesc') || "Customize the look and feel of Folia.")}
+                                                    {activeSettingsSection === 'general' && (t('options.generalSettingsDesc') || "Basic application preferences.")}
+                                                    {activeSettingsSection === 'playback' && (t('options.playbackSettingsPanelDesc') || "Audio output and playback behavior.")}
+                                                    {activeSettingsSection === 'integration' && (t('options.integrationSettingsDesc') || "Connect with external services.")}
+                                                    {activeSettingsSection === 'storage' && (t('options.storageSettingsPanelDesc') || "Manage cache and local data.")}
+                                                    {activeSettingsSection === 'desktop' && (t('options.desktopSettingsPanelDesc') || "System integration and updates.")}
+                                                    {activeSettingsSection === 'lab' && (t('options.labSettingsDesc') || "Experimental features.")}
+                                                </p>
+                                            </div>
+                                            {activeSettingsSection === 'appearance' && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onSetDaylightPreference(!isDaylight)}
+                                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${utilityGhostButtonClass} ${isDaylight ? 'text-amber-500' : 'text-blue-300'}`}
+                                                    title={t('options.daylightMode')}
+                                                    aria-label={t('options.daylightMode')}
+                                                    aria-pressed={isDaylight}
+                                                >
+                                                    {isDaylight ? <Sun size={17} /> : <Moon size={17} />}
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="space-y-8">
                                         {activeSettingsSection === 'appearance' && (

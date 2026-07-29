@@ -197,6 +197,7 @@ export default {
     ],
     "destination": "Command",
     "close": "Close command palette",
+    "runPinnedCommand": "Run pinned command: {{command}}",
     "empty": "No matching command",
     "syncNotConfigured": "Sync is not enabled. Configure and enable it in Storage settings first.",
     "run": "Run",
@@ -228,6 +229,7 @@ export default {
       "settings-appearance": { "title": "Appearance settings", "description": "Open visual and appearance settings" },
       "settings-general": { "title": "General settings", "description": "Open general app preferences" },
       "settings-playback": { "title": "Playback settings", "description": "Open playback behavior settings" },
+      "settings-local-lyrics-priority": { "title": "Local song lyrics priority", "description": "Choose whether local songs prefer local or online lyrics" },
       "settings-integration": { "title": "Integration settings", "description": "Open Stage, Spotify, Now Playing, and Navidrome settings" },
       "settings-spotify": { "title": "Spotify integration", "description": "Configure and connect Spotify" },
       "settings-discord-presence": { "title": "Discord playback status", "description": "Open Discord Rich Presence settings" },
@@ -573,6 +575,10 @@ export default {
     "showHomeTabRadio": "Show Radio",
     "showHomeTabAlbums": "Show Albums",
     "showHomeTabLocal": "Show Local",
+    "pinnedCommands": "Pinned commands",
+    "pinnedCommandsDesc": "Choose up to three commands to show below the command palette.",
+    "pinnedCommandSlot": "Slot {{index}}",
+    "pinnedCommandNone": "No pinned command",
     "playlistData": "Playlist Data",
     "lyrics": "Lyrics",
     "covers": "Covers",
@@ -649,6 +655,12 @@ export default {
     "autoUseBestLyricDesc": "Automatically search NetEase, AMLLDB, QQ, and Kugou lyrics, prioritizing word-by-word lyrics with perfect timing matches.",
     "lyricMatchPriority": "Lyric match priority",
     "lyricMatchPriorityDesc": "When multiple lyric sources have high-confidence matches, prefer this source first.",
+    "localLyricsPriority": "Local song lyrics priority",
+    "localLyricsPriorityDesc": "Choose which lyrics are used first when a local song also has an online match. Manual lyric source choices are preserved.",
+    "localLyricsPriorityLocal": "Local lyrics",
+    "localLyricsPriorityLocalDesc": "Use sidecar and embedded lyrics first, then fall back to online lyrics.",
+    "localLyricsPriorityOnline": "Online first",
+    "localLyricsPriorityOnlineDesc": "Use matched online lyrics first, then fall back to local lyrics.",
     "labHidePlayerUi": "Hide Player UI",
     "labHidePlayerUiDesc": "Only applies on the player page. You can hide the bottom control bar, bottom subtitle, and right-side button separately. After hiding the right-side button, you can still use P to open or close the right panel.",
     "alwaysShowPlayerBackButton": "Always Show Player Back Button",
@@ -756,6 +768,7 @@ export default {
     "regenerateObsBrowserSourceToken": "Regenerate Token",
     "obsBrowserSourceClients": "Clients",
     "visualSettings": "Visual Settings",
+    "daylightMode": "Light / Dark Mode",
     "lyricsRenderer": "Lyrics Animation",
     "lyricsRendererDesc": "Choose the lyrics animation mode used on the playback page.",
     "lyricsAnimationAdjust": "Lyrics Animation Adjust",
@@ -786,13 +799,18 @@ export default {
     "previewSubtitleSettings": "Subtitle",
     "previewSubtitleHotspot": "Subtitle Settings",
     "previewSubtitleSettingsDesc": "Adjust the bottom subtitle layer, translation text, and upcoming-line overlay.",
+    "previewText": "Preview Text",
+    "previewTextDefault": "Shinbun no Shi",
+    "previewTextReserved": "Wild Sesame",
+    "pausePreview": "Pause preview",
+    "resumePreview": "Resume preview",
     "subtitleOverlayOpacity": "Subtitle Opacity",
     "subtitleOverlayBackground": "Subtitle Background",
-    "subtitleOverlayBackgroundDesc": "Add a theme-aware translucent background to improve readability over busy visuals.",
+    "subtitleOverlayBackgroundDesc": "Add a theme-aware, soft diffused halo to improve readability over busy visuals.",
     "showHarmonySubtitle": "Show Harmony Subtitles",
     "showHarmonySubtitleDesc": "Show or hide the top harmony lyric overlay.",
     "harmonySubtitleBackground": "Harmony Subtitle Background",
-    "harmonySubtitleBackgroundDesc": "Add a fixed 50% opaque background behind harmony subtitles.",
+    "harmonySubtitleBackgroundDesc": "Add a soft, diffused halo behind harmony subtitles.",
     "harmonySubtitleSettings": "Harmony Subtitles",
     "harmonySubtitleSettingsDesc": "Controls for the top harmony lyric overlay.",
     "showSubtitleTranslation": "Show Translation",
@@ -1231,6 +1249,25 @@ export default {
     "noDescription": "No description available",
   },
   "releaseNotes": {
+    "v0_6_5": {
+      "intro": "Here are the new features and improvements in version 0.6.7.",
+      "lyricPreview": {
+        "title": "Improved Lyric Animation Preview",
+        "description": "Lyric animation style settings now include a pause control for the preview and a new set of placeholder lyrics."
+      },
+      "responseSmoothness": {
+        "title": "Smoother Responsiveness",
+        "description": "Improved responsiveness across multiple components for smoother interactions and dynamic updates."
+      },
+      "commandPaletteV2": {
+        "title": "Command Palette v2",
+        "description": "Pin frequently used features in Appearance settings and benefit from expanded command memory."
+      },
+      "commandPaletteQueue": {
+        "title": "Playback Queue in Command Palette",
+        "description": "Manage the playback queue directly in the Command Palette with the Queue command."
+      }
+    },
     "v0_6_3": {
       "intro": "Here are the new features and improvements in the latest version.",
       "pendoloTheme": {
