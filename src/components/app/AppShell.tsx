@@ -9,6 +9,7 @@ import WindowControls from '../WindowControls';
 type AppShellProps = {
     appStyle: React.CSSProperties;
     isElectronWindow: boolean;
+    hideFullscreenButton: boolean;
     usesCustomWindowChrome: boolean;
     useCustomWindowRadius: boolean;
     showTransparentWindowBorder: boolean;
@@ -26,6 +27,7 @@ type AppShellProps = {
 const AppShell: React.FC<AppShellProps> = ({
     appStyle,
     isElectronWindow,
+    hideFullscreenButton,
     usesCustomWindowChrome,
     useCustomWindowRadius,
     showTransparentWindowBorder,
@@ -40,52 +42,40 @@ const AppShell: React.FC<AppShellProps> = ({
     children,
 }) => {
     const { t } = useTranslation();
-    const [mainWindowState, setMainWindowState] = useState<ElectronMainWindowState>({
-        expandMode: 'maximize',
-        isFullScreen: false,
-        isMaximized: false,
-    });
+    const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+    const hasFullscreenTitlebarButton = isElectronWindow && !hideFullscreenButton;
 
     useEffect(() => {
-        const electron = window.electron;
-        if (!usesCustomWindowChrome || !electron?.getMainWindowState || !electron.onMainWindowStateChanged) {
-            setMainWindowState({ expandMode: 'maximize', isFullScreen: false, isMaximized: false });
+        if (!useCustomWindowRadius || !window.electron?.isWindowMaximized) {
+            setIsWindowMaximized(false);
             return;
         }
 
         let isCancelled = false;
 
-        const syncWindowState = async () => {
+        const syncMaximizedState = async () => {
             try {
-                const nextState = await electron.getMainWindowState();
+                const nextValue = await window.electron!.isWindowMaximized();
                 if (!isCancelled) {
-                    setMainWindowState(nextState);
+                    setIsWindowMaximized(nextValue);
                 }
             } catch {
                 if (!isCancelled) {
-                    setMainWindowState({ expandMode: 'maximize', isFullScreen: false, isMaximized: false });
+                    setIsWindowMaximized(false);
                 }
             }
         };
 
-        const unsubscribe = electron.onMainWindowStateChanged(nextState => {
-            if (!isCancelled) {
-                setMainWindowState(nextState);
-            }
-        });
-        void syncWindowState();
+        void syncMaximizedState();
+        window.addEventListener('resize', syncMaximizedState);
 
         return () => {
             isCancelled = true;
-            unsubscribe();
+            window.removeEventListener('resize', syncMaximizedState);
         };
-    }, [usesCustomWindowChrome]);
+    }, [useCustomWindowRadius]);
 
-    const isExpandControlActive = mainWindowState.expandMode === 'fullscreen'
-        ? mainWindowState.isFullScreen
-        : mainWindowState.isMaximized;
-    const hasExpandedWindowBounds = mainWindowState.isMaximized || mainWindowState.isFullScreen;
-    const shouldApplyWindowRadius = useCustomWindowRadius && !hasExpandedWindowBounds;
+    const shouldApplyWindowRadius = useCustomWindowRadius && !isWindowMaximized;
     const areTitlebarControlsVisible = isTitlebarRevealed || alwaysShowMainWindowTitlebar;
     const shouldRenderTitlebarBackdrop = !isPlayerView || (useCustomWindowRadius && !isMainWindowClickThroughEnabled);
     const titlebarBackdropClassName = `absolute inset-0 backdrop-blur-sm ${
@@ -122,7 +112,9 @@ const AppShell: React.FC<AppShellProps> = ({
                     <div className="relative h-full">
                         <TitlebarDragZone active={usesCustomWindowChrome} />
                         <div
-                            className="pointer-events-auto absolute top-0 right-[180px] z-20 h-full flex items-center"
+                            className={`pointer-events-auto absolute top-0 z-20 h-full flex items-center ${
+                                hasFullscreenTitlebarButton ? 'right-[224px]' : 'right-[180px]'
+                            }`}
                             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                         >
                             <button
@@ -132,7 +124,7 @@ const AppShell: React.FC<AppShellProps> = ({
                                 onClick={onToggleMainWindowClickThrough}
                                 className={`flex h-7 w-7 items-center justify-center rounded-full border shadow-[0_8px_24px_rgba(0,0,0,0.28)] backdrop-blur-md transition-all duration-200 ${
                                     showMainWindowClickThroughToggle
-                                        ? 'pointer-events-auto opacity-100 translate-y-0'
+                                        ? 'click-through-interactive pointer-events-auto opacity-100 translate-y-0'
                                         : 'pointer-events-none opacity-0 -translate-y-1'
                                 } ${
                                     isMainWindowClickThroughEnabled
@@ -150,10 +142,9 @@ const AppShell: React.FC<AppShellProps> = ({
                         <div className="pointer-events-auto absolute top-0 right-0 z-10 h-full">
                             <WindowControls
                                 revealed={areTitlebarControlsVisible}
-                                isExpanded={isExpandControlActive}
-                                expandMode={mainWindowState.expandMode}
                                 isDaylight={isDaylight}
                                 isMainWindowClickThroughEnabled={isMainWindowClickThroughEnabled}
+                                hideFullscreenButton={hideFullscreenButton}
                             />
                         </div>
                     </div>

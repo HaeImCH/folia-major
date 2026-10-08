@@ -1,26 +1,56 @@
-import React from 'react';
-import { Copy, Maximize2, Minimize2, Minus, Radio, Square, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Copy, Maximize, Minimize, Minus, Radio, Square, X } from 'lucide-react';
+import { usePlayerChromeSettingsStore } from '../stores/usePlayerChromeSettingsStore';
 
 export default function WindowControls({
     revealed,
-    isExpanded,
-    expandMode,
     isDaylight = false,
     isMainWindowClickThroughEnabled = false,
+    hideFullscreenButton,
 }: {
     revealed: boolean;
-    isExpanded: boolean;
-    expandMode: ElectronMainWindowState['expandMode'];
     isDaylight?: boolean;
     isMainWindowClickThroughEnabled?: boolean;
+    hideFullscreenButton: boolean;
 }) {
+    const { t } = useTranslation();
+    const [isMaximized, setIsMaximized] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const useNativeMacFullscreenButton = usePlayerChromeSettingsStore(state => state.useNativeMacFullscreenButton);
     const electron = window.electron;
+    const isMac = electron?.platform === 'darwin';
+    const usesNativeFullscreen = isMac && (useNativeMacFullscreenButton || isFullscreen);
+    const isExpanded = usesNativeFullscreen ? isFullscreen : isMaximized;
+
+    useEffect(() => {
+        if (!electron) return;
+        let active = true;
+        let fullscreenEventReceived = false;
+        const unsubscribe = electron.onWindowFullscreenChanged(fullscreen => {
+            fullscreenEventReceived = true;
+            if (active) setIsFullscreen(fullscreen);
+        });
+        const checkMaximized = async () => {
+            const maximized = await electron.isWindowMaximized();
+            if (active) setIsMaximized(maximized);
+        };
+        const checkFullscreen = async () => {
+            const fullscreen = await electron.isWindowFullscreen();
+            if (active && !fullscreenEventReceived) setIsFullscreen(fullscreen);
+        };
+        void checkMaximized();
+        void checkFullscreen();
+        window.addEventListener('resize', checkMaximized);
+        return () => {
+            active = false;
+            unsubscribe?.();
+            window.removeEventListener('resize', checkMaximized);
+        };
+    }, [electron]);
 
     if (!electron) return null;
 
-    const expandLabel = expandMode === 'fullscreen'
-        ? (isExpanded ? 'Exit fullscreen' : 'Enter fullscreen')
-        : (isExpanded ? 'Restore window' : 'Maximize window');
     const remoteControlVisible = revealed && !isMainWindowClickThroughEnabled;
     const standardControlsVisible = revealed && !isMainWindowClickThroughEnabled;
     const remoteBtnClass = `flex items-center justify-center w-11 h-full transition-all duration-200 ${
@@ -55,12 +85,23 @@ export default function WindowControls({
         >
             <button
                 className={remoteBtnClass}
-                title="Remote control"
+                title={t('ui.remoteControl')}
                 tabIndex={remoteControlVisible ? 0 : -1}
                 onClick={() => void electron.openRemoteControl?.()}
             >
                 <Radio size={15} />
             </button>
+            {!hideFullscreenButton && (
+                <button
+                    className={btnClass}
+                    tabIndex={standardControlsVisible ? 0 : -1}
+                    title={t(isFullscreen ? 'ui.exitFullscreen' : 'ui.enterFullscreen')}
+                    aria-label={t(isFullscreen ? 'ui.exitFullscreen' : 'ui.enterFullscreen')}
+                    onClick={() => void electron.toggleFullscreenWindow()}
+                >
+                    {isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
+                </button>
+            )}
             <button
                 className={btnClass}
                 tabIndex={standardControlsVisible ? 0 : -1}
@@ -71,12 +112,23 @@ export default function WindowControls({
             <button
                 className={btnClass}
                 tabIndex={standardControlsVisible ? 0 : -1}
-                aria-label={expandLabel}
-                title={expandLabel}
-                onClick={() => void electron.toggleMaximizeWindow()}
+                title={t(usesNativeFullscreen
+                    ? isExpanded ? 'ui.exitFullscreen' : 'ui.enterFullscreen'
+                    : isExpanded ? 'ui.restoreWindow' : 'ui.maximizeWindow')}
+                aria-label={t(usesNativeFullscreen
+                    ? isExpanded ? 'ui.exitFullscreen' : 'ui.enterFullscreen'
+                    : isExpanded ? 'ui.restoreWindow' : 'ui.maximizeWindow')}
+                onClick={async () => {
+                    if (usesNativeFullscreen) {
+                        await electron.toggleFullscreenWindow();
+                    } else {
+                        await electron.toggleMaximizeWindow();
+                        setIsMaximized(await electron.isWindowMaximized());
+                    }
+                }}
             >
-                {expandMode === 'fullscreen'
-                    ? isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />
+                {usesNativeFullscreen
+                    ? isExpanded ? <Minimize size={13} /> : <Maximize size={13} />
                     : isExpanded ? <Copy size={13} /> : <Square size={13} />}
             </button>
             <button

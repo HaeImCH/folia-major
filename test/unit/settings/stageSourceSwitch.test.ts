@@ -19,12 +19,15 @@ describe('settings Stage source switching', () => {
         try {
             const model = buildSettingsDialogModel({
                 state: { isOpen: true, initialTab: 'options', initialSubview: 'integration' },
-                onClose: vi.fn(),
                 themeController: {} as never,
                 themeParkInitialTheme: {} as never,
                 loadLyricFilterPreview: vi.fn().mockResolvedValue(null),
                 onSaveLyricFilterPattern: vi.fn(),
                 activePlaybackContext: 'main',
+                currentLyrics: null,
+                lyricCurrentTime: {} as never,
+                replayGainMode: 'off',
+                onReplayGainModeChange: vi.fn(),
                 setStageStatus,
                 leaveStagePlayback: vi.fn(),
                 clearStagePlaybackSession: vi.fn(),
@@ -53,12 +56,15 @@ describe('settings Stage source switching', () => {
         try {
             const model = buildSettingsDialogModel({
                 state: { isOpen: true, initialTab: 'options', initialSubview: 'integration' },
-                onClose: vi.fn(),
                 themeController: {} as never,
                 themeParkInitialTheme: {} as never,
                 loadLyricFilterPreview: vi.fn().mockResolvedValue(null),
                 onSaveLyricFilterPattern: vi.fn(),
                 activePlaybackContext: 'main',
+                currentLyrics: null,
+                lyricCurrentTime: {} as never,
+                replayGainMode: 'off',
+                onReplayGainModeChange: vi.fn(),
                 setStageStatus,
                 leaveStagePlayback: vi.fn(),
                 clearStagePlaybackSession: vi.fn(),
